@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 
+	"aiAgent/internal/browser"
 	"aiAgent/internal/cli"
 	"aiAgent/internal/config"
 	"aiAgent/internal/database"
+	"aiAgent/internal/llm"
 	"aiAgent/internal/logger"
 	"aiAgent/internal/migrations"
 
@@ -35,6 +37,19 @@ func main() {
 	defer db.Close(log)
 
 	repo := database.NewTaskRepository(db.DB)
-	console := cli.New(repo, log)
+
+	var llmClient llm.LLMClient
+	if cfg.OpenAI.KeyAI != "" {
+		llmClient = llm.NewClient(cfg.OpenAI.KeyAI, cfg.OpenAI.Model, repo)
+	}
+
+	br := browser.New(browser.Config{
+		Headless:     cfg.Browser.Headless,
+		UserDataDir:  cfg.Browser.UserDataDir,
+		BrowsersPath: cfg.Browser.BrowsersPath,
+		Display:      cfg.Browser.Display,
+	})
+
+	console := cli.New(repo, log, llmClient, br)
 	console.Run(context.Background())
 }

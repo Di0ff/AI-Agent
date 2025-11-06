@@ -43,7 +43,9 @@ func (c *Client) PlanAction(ctx context.Context, task string, pageContext string
 	if err != nil {
 		if c.logger != nil {
 			fullPrompt := formatPrompt(systemMsg, prompt)
-			_ = c.logger.LogLLMRequest(ctx, taskID, stepID, "error", fullPrompt, err.Error(), c.model, 0)
+			sanitizedPrompt := c.sanitizer.Sanitize(fullPrompt)
+			sanitizedError := c.sanitizer.Sanitize(err.Error())
+			_ = c.logger.LogLLMRequest(ctx, taskID, stepID, "error", sanitizedPrompt, sanitizedError, c.model, 0)
 		}
 		return nil, fmt.Errorf("ошибка запроса к OpenAI: %w", err)
 	}
@@ -65,8 +67,10 @@ func (c *Client) PlanAction(ctx context.Context, task string, pageContext string
 
 	if c.logger != nil {
 		fullPrompt := formatPrompt(systemMsg, prompt)
+		sanitizedPrompt := c.sanitizer.Sanitize(fullPrompt)
+		sanitizedResponse := c.sanitizer.Sanitize(responseText)
 		tokensUsed := resp.Usage.TotalTokens
-		_ = c.logger.LogLLMRequest(ctx, taskID, stepID, "assistant", fullPrompt, responseText, c.model, tokensUsed)
+		_ = c.logger.LogLLMRequest(ctx, taskID, stepID, "assistant", sanitizedPrompt, sanitizedResponse, c.model, tokensUsed)
 	}
 
 	if toolCall != nil {

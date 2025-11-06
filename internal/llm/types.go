@@ -8,6 +8,7 @@ type Logger interface {
 
 type LLMClient interface {
 	PlanAction(ctx context.Context, task string, pageContext string, taskID *uint, stepID *uint) (*StepPlan, error)
+	CheckDangerousAction(ctx context.Context, action, selector, value, reasoning string) (bool, string, error)
 }
 
 type StepPlan struct {

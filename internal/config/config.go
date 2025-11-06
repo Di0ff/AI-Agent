@@ -73,7 +73,7 @@ func Load() (*Cfg, error) {
 			BrowsersPath: env("PLAYWRIGHT_BROWSERS_PATH", ""),
 		},
 		Migrations: Migrations{
-			Path: env("MIGRATIONS_PATH", "file://migrations"),
+			Path: env("MIGRATIONS_PATH", "file://internal/migrations/scripts"),
 		},
 	}
 

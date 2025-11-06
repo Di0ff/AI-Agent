@@ -55,3 +55,15 @@ func (r *TaskRepository) LogLLMRequest(ctx context.Context, taskID *uint, stepID
 	}
 	return r.db.WithContext(ctx).Create(log).Error
 }
+
+func (r *TaskRepository) CreateStep(step *AgentStep) error {
+	return r.db.Create(step).Error
+}
+
+func (r *TaskRepository) GetStepsByTaskID(taskID uint) ([]AgentStep, error) {
+	var steps []AgentStep
+	if err := r.db.Where("task_id = ?", taskID).Order("step_no ASC").Find(&steps).Error; err != nil {
+		return nil, err
+	}
+	return steps, nil
+}
