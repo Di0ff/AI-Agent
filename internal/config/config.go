@@ -1,17 +1,18 @@
 package config
 
 import (
-	"fmt"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/joho/godotenv"
 )
 
 type Cfg struct {
 	Database   Database
-	App        App
 	Logger     Logger
 	OpenAI     OpenAI
+	Browser    Browser
 	Migrations Migrations
 }
 
@@ -27,15 +28,6 @@ type Migrations struct {
 	Path string
 }
 
-type App struct {
-	Name        string
-	Version     string
-	Port        string
-	Host        string
-	StaticDir   string
-	FrontendDir string
-}
-
 type Logger struct {
 	Env   string
 	Level string
@@ -44,55 +36,67 @@ type Logger struct {
 type OpenAI struct {
 	KeyAI     string
 	Model     string
-	MaxTokens string
+	MaxTokens int
+}
+
+type Browser struct {
+	Display      string
+	Headless     bool
+	UserDataDir  string
+	BrowsersPath string
 }
 
 func Load() (*Cfg, error) {
-	if err := godotenv.Load(); err != nil {
-		fmt.Printf("Файл не найден: %v", err)
-	}
+	_ = godotenv.Load()
 
 	cfg := &Cfg{
 		Database: Database{
-			Host:     getEnv("DB_HOST"),
-			Port:     getEnv("DB_PORT"),
-			Name:     getEnv("DB_NAME"),
-			User:     getEnv("DB_USER"),
-			Password: getEnv("DB_PASS"),
+			Host:     os.Getenv("DB_HOST"),
+			Port:     os.Getenv("DB_PORT"),
+			Name:     os.Getenv("DB_NAME"),
+			User:     os.Getenv("DB_USER"),
+			Password: os.Getenv("DB_PASS"),
 		},
-
-		App: App{
-			Name:        getEnv("APP_NAME"),
-			Version:     getEnv("APP_VERSION"),
-			Port:        getEnv("APP_PORT"),
-			Host:        getEnv("APP_HOST"),
-			StaticDir:   getEnv("STATIC_DIR"),
-			FrontendDir: getEnv("FRONTEND_DIR"),
-		},
-
 		Logger: Logger{
-			Env:   getEnv("ENV"),
-			Level: getEnv("LOG_LEVEL"),
+			Env:   env("ENV", "dev"),
+			Level: env("LOG_LEVEL", "info"),
 		},
-
 		OpenAI: OpenAI{
-			KeyAI:     getEnv("OPENAI_API_KEY"),
-			Model:     getEnv("OPENAI_MODEL"),
-			MaxTokens: getEnv("OPENAI_MAX_TOKENS"),
+			KeyAI:     os.Getenv("OPENAI_API_KEY"),
+			Model:     env("OPENAI_MODEL", "gpt-4o"),
+			MaxTokens: envInt("OPENAI_MAX_TOKENS", 4000),
 		},
-
+		Browser: Browser{
+			Display:      env("DISPLAY", ":0"),
+			Headless:     envBool("PW_HEADLESS"),
+			UserDataDir:  env("PW_USER_DATA_DIR", "./userdata"),
+			BrowsersPath: env("PLAYWRIGHT_BROWSERS_PATH", ""),
+		},
 		Migrations: Migrations{
-			Path: getEnv("MIGRATIONS_PATH"),
+			Path: env("MIGRATIONS_PATH", "file://migrations"),
 		},
 	}
 
 	return cfg, nil
 }
 
-func getEnv(temp string) string {
-	if value := os.Getenv(temp); value != "" {
-		return value
+func env(key, defaultValue string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
 	}
+	return defaultValue
+}
 
-	return ""
+func envInt(key string, defaultValue int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return defaultValue
+}
+
+func envBool(key string) bool {
+	v := strings.ToLower(os.Getenv(key))
+	return v == "true" || v == "1" || v == "yes"
 }

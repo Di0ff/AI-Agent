@@ -23,9 +23,5 @@ COPY --from=builder /app/main .
 COPY .env .env
 
 COPY internal/migrations/scripts ./migrations
-
-COPY frontend ./frontend
-
-EXPOSE 8080
     
 CMD ["./main"]

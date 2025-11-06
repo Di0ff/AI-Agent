@@ -1,6 +1,10 @@
 package database
 
-import "gorm.io/gorm"
+import (
+	"context"
+
+	"gorm.io/gorm"
+)
 
 type TaskRepository struct {
 	db *gorm.DB
@@ -37,4 +41,17 @@ func (r *TaskRepository) UpdateTaskStatus(id uint, status, summary string) error
 			"status":         status,
 			"result_summary": summary,
 		}).Error
+}
+
+func (r *TaskRepository) LogLLMRequest(ctx context.Context, taskID *uint, stepID *uint, role, promptText, responseText, model string, tokensUsed int) error {
+	log := &LlmLog{
+		TaskID:       taskID,
+		StepID:       stepID,
+		Role:         role,
+		PromptText:   promptText,
+		ResponseText: responseText,
+		Model:        model,
+		TokensUsed:   tokensUsed,
+	}
+	return r.db.WithContext(ctx).Create(log).Error
 }

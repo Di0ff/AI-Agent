@@ -1,1 +1,35 @@
+# Environment variables
 .env
+
+# Project documentation (опционально, можно убрать если нужны в git)
+plan.txt
+text.txt
+
+# Build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+main
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Dependencies
+vendor/
+
+# Logs
+*.log
+logs/
+
+# User data (браузерные сессии)
+userdata/
