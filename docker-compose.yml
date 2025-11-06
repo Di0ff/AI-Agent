@@ -1,0 +1,65 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASS}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - ai_network
+
+  playwright:
+    image: mcr.microsoft.com/playwright:v1.45.0-jammy
+    container_name: playwright
+    shm_size: 2gb
+    env_file:
+      - .env
+    environment:
+      - DISPLAY=${PW_DISPLAY:-:0}
+      - PLAYWRIGHT_BROWSERS_PATH=${PW_BROWSERS_PATH:-/ms-playwright}
+      - USER_DATA_DIR=${PW_USER_DATA_DIR:-/root/.cache/ms-playwright}
+      - HEADLESS=${PW_HEADLESS:-false}
+    volumes:
+      - ./userdata:${PW_USER_DATA_DIR:-/root/.cache/ms-playwright}
+    networks:
+      - ai_network
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: app
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DB_HOST: postgres
+    ports:
+      - "127.0.0.1:${APP_PORT:-8080}:8080"
+    volumes:
+     # - /etc/letsencrypt:/etc/letsencrypt:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - ai_network
+
+volumes:
+  postgres_data:
+
+networks:
+  ai_network:
+    driver: bridge
