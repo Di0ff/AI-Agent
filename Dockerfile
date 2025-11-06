@@ -22,7 +22,7 @@ COPY --from=builder /app/main .
 
 COPY .env .env
 
-COPY internal/database/migrations ./internal/database/migrations
+COPY internal/migrations/scripts ./migrations
 
 COPY frontend ./frontend
 

@@ -33,7 +33,7 @@ services:
       - USER_DATA_DIR=${PW_USER_DATA_DIR:-/root/.cache/ms-playwright}
       - HEADLESS=${PW_HEADLESS:-false}
     volumes:
-      - ./userdata:${PW_USER_DATA_DIR:-/root/.cache/ms-playwright}
+      - ./userdata:/root/.cache/ms-playwright
     networks:
       - ai_network
 
@@ -49,8 +49,6 @@ services:
       DB_HOST: postgres
     ports:
       - "127.0.0.1:${APP_PORT:-8080}:8080"
-    volumes:
-     # - /etc/letsencrypt:/etc/letsencrypt:ro
     depends_on:
       postgres:
         condition: service_healthy

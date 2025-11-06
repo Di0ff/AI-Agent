@@ -36,7 +36,7 @@ func Run(cfg *config.Cfg, log *logger.Zap) error {
 
 	if err != nil {
 		log.Error("Ошибка инициализации миграций", zap.Error(err))
-		return nil
+		return err
 	}
 
 	defer func() {
@@ -55,7 +55,7 @@ func Run(cfg *config.Cfg, log *logger.Zap) error {
 		}
 
 		log.Error("Ошибка применения миграций", zap.Error(err))
-		return nil
+		return err
 	}
 
 	log.Info("Успех! Миграции применились")
@@ -74,7 +74,7 @@ func Down(cfg *config.Cfg, log *logger.Zap) error {
 
 	if err != nil {
 		log.Error("Ошибка инициализации миграций", zap.Error(err))
-		return nil
+		return err
 	}
 
 	defer func() {
@@ -92,7 +92,7 @@ func Down(cfg *config.Cfg, log *logger.Zap) error {
 			return nil
 		}
 		log.Error("Ошибка отката миграций", zap.Error(err))
-		return nil
+		return err
 	}
 
 	log.Info("Успех! Миграция откатилась")

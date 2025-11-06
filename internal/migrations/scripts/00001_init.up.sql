@@ -30,3 +30,5 @@ CREATE TABLE IF NOT EXISTS llm_logs (
     tokens_used     INT DEFAULT 0,
     created_at      TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
+
