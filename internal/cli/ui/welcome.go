@@ -18,7 +18,7 @@ func PrintWelcome() {
 	PrintHelp()
 	fmt.Println(ColorCyan + IconBulb + " Совет:" + ColorReset + " Используйте " + ColorYellow + "open-persistent" + ColorReset + " для входа на сайты, затем " + ColorYellow + "run" + ColorReset + " для выполнения задач")
 	fmt.Println()
-	fmt.Println(ColorGray + "⬆️ ⬇️" + ColorReset + " Используйте стрелки для навигации по истории команд")
+	fmt.Println(ColorGray + "⬆️  ⬇️" + ColorReset + "  Используйте стрелки для навигации по истории команд")
 	fmt.Println()
 }
 

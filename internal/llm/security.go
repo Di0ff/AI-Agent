@@ -37,7 +37,7 @@ func (c *Client) CheckDangerousAction(ctx context.Context, action, selector, val
   "message": "сообщение для пользователя с деталями действия"
 }`, action, selector, value, reasoning)
 
-	systemMsg := "Ты - система безопасности. Анализируй действия AI-агента и определяй потенциальные риски."
+	systemMsg := "Ты - система безопасности. Анализируй действия AI-агента и определяй потенциальные риски. ВСЕГДА отвечай на русском языке."
 
 	resp, err := c.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
 		Model: c.model,

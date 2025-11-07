@@ -16,28 +16,28 @@ type PopupInfo struct {
 }
 
 func (c *Client) AnalyzePopup(ctx context.Context, elements string) (*PopupInfo, error) {
-	prompt := fmt.Sprintf(`Analyze the page elements and determine if there is a popup, modal, or overlay that should be closed.
+	prompt := fmt.Sprintf(`Проанализируй элементы страницы и определи есть ли всплывающее окно, модальное окно или оверлей которые нужно закрыть.
 
-Elements data:
+Данные элементов:
 %s
 
-Determine:
-1. Is there a popup/modal/overlay present?
-2. If yes, what is the CSS selector of the close button?
-3. Brief description of the popup
+Определи:
+1. Есть ли всплывающее окно/модальное окно/оверлей?
+2. Если да, какой CSS селектор кнопки закрытия?
+3. Краткое описание всплывающего окна
 
-Respond in JSON format:
+Отвечай в формате JSON:
 {
   "has_popup": true/false,
-  "close_selector": "CSS selector",
-  "popup_description": "brief description",
-  "reasoning": "your analysis"
+  "close_selector": "CSS селектор",
+  "popup_description": "краткое описание",
+  "reasoning": "твой анализ"
 }`, elements)
 
 	messages := []openai.ChatCompletionMessage{
 		{
 			Role:    "system",
-			Content: "You are an expert at analyzing web page structure and identifying popups and their close buttons.",
+			Content: "Ты эксперт в анализе структуры веб-страниц и определении всплывающих окон и их кнопок закрытия. ВСЕГДА отвечай на русском языке.",
 		},
 		{
 			Role:    "user",

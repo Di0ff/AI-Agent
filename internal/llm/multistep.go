@@ -25,46 +25,46 @@ func (c *Client) PlanMultiStep(ctx context.Context, task string, pageContext str
 	fewShot := GetFewShotExamplesForCategory(category)
 	guidance := GetTaskSpecificGuidance(category)
 
-	prompt := fmt.Sprintf(`You are an AI agent controlling a web browser. Plan a sequence of actions to accomplish this task.
+	prompt := fmt.Sprintf(`Ты AI-агент, управляющий веб-браузером. Спланируй последовательность действий для выполнения этой задачи.
 
-Task: %s
+Задача: %s
 
-Current page context:
+Контекст текущей страницы:
 %s
 
 %s
 
 %s
 
-Plan the next %d steps to accomplish this task. Think strategically about the optimal sequence.
+Спланируй следующие %d шагов для выполнения задачи. Думай стратегически об оптимальной последовательности.
 
-Available actions:
-- navigate: go to a URL
-- click: click an element
-- type: type text into an element
-- extract_info: extract information from the page
-- ask_user: ask the user for information
-- complete: task is finished
+Доступные действия:
+- navigate: перейти по URL
+- click: кликнуть на элемент
+- type: ввести текст в элемент
+- extract_info: извлечь информацию со страницы
+- ask_user: спросить пользователя
+- complete: задача завершена
 
-Respond in JSON format:
+Отвечай в формате JSON:
 {
   "steps": [
     {
       "action": "action_name",
-      "selector": "css_selector (if applicable)",
-      "value": "value (if applicable)",
-      "reasoning": "why this step"
+      "selector": "css_selector (если применимо)",
+      "value": "value (если применимо)",
+      "reasoning": "почему этот шаг"
     }
   ],
-  "overall_strategy": "high-level strategy description",
-  "fallback_strategy": "what to do if a step fails",
-  "estimated_steps": number
+  "overall_strategy": "описание общей стратегии",
+  "fallback_strategy": "что делать если шаг не выполнится",
+  "estimated_steps": число
 }`, task, pageContext, fewShot, guidance, maxSteps)
 
 	messages := []openai.ChatCompletionMessage{
 		{
 			Role:    "system",
-			Content: systemMsg + "\n\nYou are an expert at planning multi-step web automation tasks. Think strategically and plan ahead.",
+			Content: systemMsg + "\n\nТы эксперт в планировании многошаговых задач веб-автоматизации. Думай стратегически и планируй заранее. ВСЕГДА отвечай на русском языке.",
 		},
 		{
 			Role:    "user",
@@ -108,45 +108,45 @@ func (c *Client) Replan(ctx context.Context, task string, pageContext string, or
 
 	stepsJSON, _ := json.MarshalIndent(originalPlan.Steps, "", "  ")
 
-	prompt := fmt.Sprintf(`You are an AI agent controlling a web browser. The original plan failed, you need to replan.
+	prompt := fmt.Sprintf(`Ты AI-агент, управляющий веб-браузером. Оригинальный план провалился, нужно переспланировать.
 
-Task: %s
+Задача: %s
 
-Current page context:
+Контекст текущей страницы:
 %s
 
-Original plan:
+Оригинальный план:
 %s
 
-Failed step:
-Action: %s
-Selector: %s
-Value: %s
-Reasoning: %s
+Провалившийся шаг:
+Действие: %s
+Селектор: %s
+Значение: %s
+Обоснование: %s
 
-Error: %s
+Ошибка: %s
 
-Create a new plan that works around this failure. Consider alternative approaches.
+Создай новый план, который обойдет эту ошибку. Рассмотри альтернативные подходы.
 
-Plan the next %d steps. Respond in JSON format:
+Спланируй следующие %d шагов. Отвечай в формате JSON:
 {
   "steps": [
     {
       "action": "action_name",
-      "selector": "css_selector (if applicable)",
-      "value": "value (if applicable)",
-      "reasoning": "why this step"
+      "selector": "css_selector (если применимо)",
+      "value": "value (если применимо)",
+      "reasoning": "почему этот шаг"
     }
   ],
-  "overall_strategy": "new strategy description",
-  "fallback_strategy": "what to do if this fails",
-  "estimated_steps": number
+  "overall_strategy": "описание новой стратегии",
+  "fallback_strategy": "что делать если это провалится",
+  "estimated_steps": число
 }`, task, pageContext, string(stepsJSON), failedStep.Action, failedStep.Selector, failedStep.Value, failedStep.Reasoning, errorMessage, maxSteps)
 
 	messages := []openai.ChatCompletionMessage{
 		{
 			Role:    "system",
-			Content: "You are an expert at recovering from failures and finding alternative approaches to web automation tasks.",
+			Content: "Ты эксперт в восстановлении после ошибок и поиске альтернативных подходов к задачам веб-автоматизации. ВСЕГДА отвечай на русском языке.",
 		},
 		{
 			Role:    "user",
