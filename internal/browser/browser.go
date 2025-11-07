@@ -28,13 +28,49 @@ func (b *PlaywrightBrowser) Launch(ctx context.Context) error {
 	}
 	b.pw = pw
 
-	opts := playwright.BrowserTypeLaunchOptions{
-		Headless: playwright.Bool(b.cfg.Headless),
+	args := []string{
+		"--no-sandbox",
 	}
 
+	// Если указан UserDataDir - используем persistent context
 	if b.cfg.UserDataDir != "" {
-		userDataDir := "--user-data-dir=" + b.cfg.UserDataDir
-		opts.Args = []string{userDataDir}
+		opts := playwright.BrowserTypeLaunchPersistentContextOptions{
+			Headless: playwright.Bool(b.cfg.Headless),
+			Args:     args,
+		}
+
+		if b.cfg.Display != "" {
+			opts.Env = map[string]string{
+				"DISPLAY": b.cfg.Display,
+			}
+		}
+
+		browserContext, err := pw.Firefox.LaunchPersistentContext(b.cfg.UserDataDir, opts)
+		if err != nil {
+			return err
+		}
+		b.context = browserContext
+
+		pages := browserContext.Pages()
+		if len(pages) == 0 {
+			page, err := browserContext.NewPage()
+			if err != nil {
+				return err
+			}
+			b.page = page
+		} else {
+			b.page = pages[0]
+		}
+
+		b.page.SetDefaultTimeout(float64(b.cfg.Timeout.Milliseconds()))
+
+		return nil
+	}
+
+	// Обычный режим без persistent context
+	opts := playwright.BrowserTypeLaunchOptions{
+		Headless: playwright.Bool(b.cfg.Headless),
+		Args:     args,
 	}
 
 	if b.cfg.Display != "" {
@@ -43,7 +79,7 @@ func (b *PlaywrightBrowser) Launch(ctx context.Context) error {
 		}
 	}
 
-	browser, err := pw.Chromium.Launch(opts)
+	browser, err := pw.Firefox.Launch(opts)
 	if err != nil {
 		return err
 	}
@@ -145,6 +181,11 @@ func (b *PlaywrightBrowser) GetPageContext(ctx context.Context) (string, error) 
 }
 
 func (b *PlaywrightBrowser) Close() error {
+	if b.context != nil {
+		if err := b.context.Close(); err != nil {
+			return err
+		}
+	}
 	if b.browser != nil {
 		if err := b.browser.Close(); err != nil {
 			return err

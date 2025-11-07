@@ -59,6 +59,7 @@ type ViewportBounds struct {
 type PlaywrightBrowser struct {
 	pw             *playwright.Playwright
 	browser        playwright.Browser
+	context        playwright.BrowserContext
 	page           playwright.Page
 	cfg            Config
 	popupDetector  PopupDetector

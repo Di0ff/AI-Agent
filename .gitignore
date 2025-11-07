@@ -33,3 +33,7 @@ logs/
 
 # User data (браузерные сессии)
 userdata/
+browser-data/
+
+migrations
+ai-agent

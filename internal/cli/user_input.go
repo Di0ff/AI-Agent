@@ -12,6 +12,8 @@ import (
 	"aiAgent/internal/database"
 	"aiAgent/internal/llm"
 	"aiAgent/internal/logger"
+
+	"github.com/chzyer/readline"
 )
 
 type userInputProvider struct {
@@ -53,12 +55,23 @@ func New(repo *database.TaskRepository, log *logger.Zap, llmClient llm.LLMClient
 		MaxTokens:         2000,
 		UserInputProvider: userInput,
 	})
+
+	rl, err := readline.NewEx(&readline.Config{
+		Prompt:          "\033[1m>\033[0m ",
+		HistoryFile:     "/tmp/ai-agent-history.txt",
+		InterruptPrompt: "^C",
+		EOFPrompt:       "exit",
+	})
+	if err != nil {
+		panic(err)
+	}
+
 	return &CLI{
 		repo:      repo,
 		log:       log,
 		llmClient: llmClient,
 		browser:   br,
 		agent:     ag,
-		reader:    reader,
+		rl:        rl,
 	}
 }

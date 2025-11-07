@@ -151,10 +151,9 @@ func (a *Agent) ExecuteTask(ctx context.Context, task *database.Task) error {
 			}
 		}
 
-		stepID := uint(stepNo)
 		var plan *llm.StepPlan
 		err = retryAction(ctx, a.retries, a.retryDelay, func() error {
-			p, e := a.llmClient.PlanAction(ctx, task.UserInput, pageContext, &task.ID, &stepID)
+			p, e := a.llmClient.PlanAction(ctx, task.UserInput, pageContext, &task.ID, nil)
 			if e != nil {
 				return e
 			}
@@ -282,10 +281,9 @@ func (a *Agent) executeTaskString(ctx context.Context, taskText string, maxSteps
 			}
 		}
 
-		stepID := uint(stepNo)
 		var plan *llm.StepPlan
 		err = retryAction(ctx, a.retries, a.retryDelay, func() error {
-			p, e := a.llmClient.PlanAction(ctx, taskText, pageContext, nil, &stepID)
+			p, e := a.llmClient.PlanAction(ctx, taskText, pageContext, nil, nil)
 			if e != nil {
 				return e
 			}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/sashabaranov/go-openai"
 )
@@ -62,6 +63,13 @@ func (c *Client) CheckDangerousAction(ctx context.Context, action, selector, val
 	}
 
 	responseText := resp.Choices[0].Message.Content
+
+	// Очистка от markdown блока, если есть
+	responseText = strings.TrimSpace(responseText)
+	responseText = strings.TrimPrefix(responseText, "```json")
+	responseText = strings.TrimPrefix(responseText, "```")
+	responseText = strings.TrimSuffix(responseText, "```")
+	responseText = strings.TrimSpace(responseText)
 
 	var result SecurityCheckResult
 	if err := json.Unmarshal([]byte(responseText), &result); err != nil {
