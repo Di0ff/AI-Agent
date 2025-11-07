@@ -1,3 +1,5 @@
+// Package browser предоставляет обертку над Playwright для автоматизации браузера Firefox.
+// Пакет включает функции для навигации, работы с элементами, формами, попапами и AJAX запросами.
 package browser
 
 import (
@@ -8,6 +10,8 @@ import (
 	"github.com/playwright-community/playwright-go"
 )
 
+// Browser определяет интерфейс для управления веб-браузером.
+// Все операции поддерживают контекст для отмены и таймауты.
 type Browser interface {
 	Launch(ctx context.Context) error
 	Navigate(ctx context.Context, url string) error
@@ -29,34 +33,40 @@ type Browser interface {
 	Close() error
 }
 
+// PageSnapshot представляет снимок состояния веб-страницы.
+// Включает URL, заголовок, список интерактивных элементов и дерево доступности.
 type PageSnapshot struct {
-	URL               string
-	Title             string
-	Elements          []ElementInfo
-	Viewport          ViewportBounds
-	AccessibilityTree string
+	URL               string        // URL страницы
+	Title             string        // Заголовок страницы
+	Elements          []ElementInfo // Список элементов на странице
+	Viewport          ViewportBounds // Размеры viewport
+	AccessibilityTree string        // Дерево доступности в JSON формате
 }
 
+// ElementInfo содержит информацию об элементе на странице.
 type ElementInfo struct {
-	Tag         string
-	Text        string
-	Selector    string
-	Visible     bool
-	Interactive bool
-	InViewport  bool
-	Bounds      ViewportBounds
-	Role        string
-	Label       string
-	Priority    int
+	Tag         string         // HTML тег элемента
+	Text        string         // Текстовое содержимое
+	Selector    string         // CSS селектор для доступа
+	Visible     bool           // Виден ли элемент
+	Interactive bool           // Можно ли взаимодействовать
+	InViewport  bool           // Находится ли в видимой области
+	Bounds      ViewportBounds // Координаты и размеры
+	Role        string         // ARIA роль
+	Label       string         // ARIA label
+	Priority    int            // Приоритет элемента
 }
 
+// ViewportBounds определяет границы области (viewport или элемента).
 type ViewportBounds struct {
-	X      float64
-	Y      float64
-	Width  float64
-	Height float64
+	X      float64 // X координата
+	Y      float64 // Y координата
+	Width  float64 // Ширина
+	Height float64 // Высота
 }
 
+// PlaywrightBrowser реализует интерфейс Browser используя Playwright.
+// Поддерживает concurrent доступ через sync.RWMutex.
 type PlaywrightBrowser struct {
 	pw             *playwright.Playwright
 	browser        playwright.Browser
@@ -67,11 +77,12 @@ type PlaywrightBrowser struct {
 	mu             sync.RWMutex // Защита от concurrent доступа к page, browser, context
 }
 
+// Config содержит конфигурацию для браузера.
 type Config struct {
-	Headless        bool
-	UserDataDir     string
-	BrowsersPath    string
-	Display         string
+	Headless        bool          // Headless режим (без GUI)
+	UserDataDir     string        // Директория для сохранения сессий
+	BrowsersPath    string        // Путь к браузерам Playwright
+	Display         string        // DISPLAY для Linux (например :0)
 	Timeout         time.Duration // Дефолтный timeout для большинства операций
 	NavigateTimeout time.Duration // Timeout для navigate операций (обычно больше)
 	ActionTimeout   time.Duration // Timeout для click/type операций

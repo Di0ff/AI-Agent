@@ -1,3 +1,5 @@
+// Package config управляет конфигурацией приложения из переменных окружения (.env).
+// Включает валидацию всех обязательных параметров при загрузке.
 package config
 
 import (
@@ -10,44 +12,53 @@ import (
 	"github.com/joho/godotenv"
 )
 
+// Cfg содержит всю конфигурацию приложения.
 type Cfg struct {
-	Database   Database
-	Logger     Logger
-	OpenAI     OpenAI
-	Browser    Browser
-	Migrations Migrations
+	Database   Database   // Конфигурация PostgreSQL
+	Logger     Logger     // Конфигурация логирования
+	OpenAI     OpenAI     // Конфигурация OpenAI API
+	Browser    Browser    // Конфигурация браузера
+	Migrations Migrations // Конфигурация миграций БД
 }
 
+// Database содержит параметры подключения к PostgreSQL.
 type Database struct {
-	Host     string
-	Port     string
-	Name     string
-	User     string
-	Password string
+	Host     string // Хост БД (localhost)
+	Port     string // Порт БД (5432)
+	Name     string // Имя базы данных
+	User     string // Пользователь БД
+	Password string // Пароль БД
 }
 
+// Migrations содержит путь к SQL миграциям.
 type Migrations struct {
-	Path string
+	Path string // Путь к миграциям (file://internal/migrations/scripts)
 }
 
+// Logger содержит конфигурацию логирования.
 type Logger struct {
-	Env   string
-	Level string
+	Env   string // Окружение (dev, prod, test)
+	Level string // Уровень логирования (debug, info, warn, error)
 }
 
+// OpenAI содержит конфигурацию для OpenAI API.
 type OpenAI struct {
-	KeyAI     string
-	Model     string
-	MaxTokens int
+	KeyAI     string // API ключ (должен начинаться с sk-)
+	Model     string // Модель (gpt-4o)
+	MaxTokens int    // Максимальное количество токенов в запросе
 }
 
+// Browser содержит конфигурацию браузера Firefox.
 type Browser struct {
-	Display      string
-	Headless     bool
-	UserDataDir  string
-	BrowsersPath string
+	Display      string // DISPLAY для Linux (например :0)
+	Headless     bool   // Headless режим (без GUI)
+	UserDataDir  string // Директория для сохранения сессий
+	BrowsersPath string // Путь к браузерам Playwright
 }
 
+// Load загружает конфигурацию из файла .env и переменных окружения.
+// Автоматически валидирует все обязательные параметры.
+// Возвращает ошибку если конфигурация невалидна.
 func Load() (*Cfg, error) {
 	_ = godotenv.Load()
 

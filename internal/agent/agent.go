@@ -24,6 +24,17 @@ func getSanitizer(llmClient llm.LLMClient) *sanitizer.DataSanitizer {
 	return sanitizer.New()
 }
 
+// New создает новый экземпляр агента с заданной конфигурацией.
+// Агент инициализируется с браузером, LLM клиентом, репозиторием для хранения задач и логгером.
+// Если в конфигурации не указаны дефолтные значения, они устанавливаются автоматически:
+//   - MaxSteps: 50
+//   - MaxTokens: 2000
+//   - Retries: 3
+//   - RetryDelay: 2 секунды
+//   - ConfidenceMin: 0.7
+//
+// При использовании подагентов (UseSubAgents=true) инициализируются специализированные агенты
+// для навигации, работы с формами, извлечения данных и взаимодействия с элементами.
 func New(br browser.Browser, llmClient llm.LLMClient, repo *database.TaskRepository, log *logger.Zap, cfg Config) *Agent {
 	if cfg.MaxSteps == 0 {
 		cfg.MaxSteps = 50
