@@ -1,39 +1,22 @@
 # Environment variables
 .env
 
-# Project documentation (опционально, можно убрать если нужны в git)
-plan.txt
-text.txt
-
 # Build artifacts
+ai-agent
 *.exe
-*.exe~
 *.dll
 *.so
 *.dylib
-main
 
 # IDE
 .idea/
 .vscode/
-*.swp
-*.swo
-*~
 
 # OS
 .DS_Store
-Thumbs.db
 
-# Dependencies
-vendor/
-
-# Logs
-*.log
-logs/
-
-# User data (браузерные сессии)
-userdata/
+# Browser sessions
 browser-data/
 
+# Migrations symlink
 migrations
-ai-agent

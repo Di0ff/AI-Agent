@@ -2,6 +2,7 @@ package browser
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/playwright-community/playwright-go"
@@ -63,12 +64,15 @@ type PlaywrightBrowser struct {
 	page           playwright.Page
 	cfg            Config
 	popupDetector  PopupDetector
+	mu             sync.RWMutex // Защита от concurrent доступа к page, browser, context
 }
 
 type Config struct {
-	Headless     bool
-	UserDataDir  string
-	BrowsersPath string
-	Display      string
-	Timeout      time.Duration
+	Headless        bool
+	UserDataDir     string
+	BrowsersPath    string
+	Display         string
+	Timeout         time.Duration // Дефолтный timeout для большинства операций
+	NavigateTimeout time.Duration // Timeout для navigate операций (обычно больше)
+	ActionTimeout   time.Duration // Timeout для click/type операций
 }

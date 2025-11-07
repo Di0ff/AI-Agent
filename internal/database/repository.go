@@ -6,6 +6,18 @@ import (
 	"gorm.io/gorm"
 )
 
+// TaskRepository предоставляет методы для работы с задачами и логами.
+//
+// БЕЗОПАСНОСТЬ: Все SQL запросы используют GORM с prepared statements,
+// что автоматически защищает от SQL injection атак.
+// Примеры безопасного использования:
+//   - Where("id = ?", id) - параметризованный запрос
+//   - First(&task, id) - GORM автоматически использует prepared statement
+//   - Create(t) - все поля экранируются
+//
+// ЗАПРЕЩЕНО использовать:
+//   - db.Raw("SELECT * FROM tasks WHERE id = " + id) - SQL injection!
+//   - db.Exec("DELETE FROM tasks WHERE user_input = " + userInput) - SQL injection!
 type TaskRepository struct {
 	db *gorm.DB
 }

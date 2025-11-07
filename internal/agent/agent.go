@@ -83,6 +83,205 @@ func New(br browser.Browser, llmClient llm.LLMClient, repo *database.TaskReposit
 	return agent
 }
 
+// contextFields создаёт набор контекстных полей для логирования
+func (a *Agent) contextFields(taskID *uint, stepNo int, fields ...zap.Field) []zap.Field {
+	result := make([]zap.Field, 0, len(fields)+2)
+	if taskID != nil {
+		result = append(result, zap.Uint("task_id", *taskID))
+	}
+	if stepNo > 0 {
+		result = append(result, zap.Int("step", stepNo))
+	}
+	result = append(result, fields...)
+	return result
+}
+
+func (a *Agent) getPageContext(ctx context.Context) (string, error) {
+	snapshot, err := a.browser.GetPageSnapshot(ctx)
+	if err == nil && snapshot != nil {
+		return a.limitContextFromSnapshot(snapshot), nil
+	}
+
+	htmlContext, err := a.browser.GetPageContext(ctx)
+	if err != nil {
+		return "", err
+	}
+	return a.limitContext(htmlContext), nil
+}
+
+func (a *Agent) getPlanForStep(ctx context.Context, userInput, pageContext string, taskID *uint) (*llm.StepPlan, error) {
+	var plan *llm.StepPlan
+	err := retryAction(ctx, a.retries, a.retryDelay, func() error {
+		p, e := a.llmClient.PlanAction(ctx, userInput, pageContext, taskID, nil)
+		if e != nil {
+			return e
+		}
+		plan = p
+		return nil
+	})
+	return plan, err
+}
+
+func (a *Agent) checkSecurityAndConfirm(ctx context.Context, plan *llm.StepPlan, stepNo int) (bool, error) {
+	isDangerous, llmMessage, err := a.securityChecker.IsDangerousAction(ctx, plan.Action, plan.Selector, plan.Value, plan.Reasoning)
+	if err != nil {
+		a.log.Warn("Ошибка проверки безопасности, продолжаем выполнение", a.contextFields(nil, stepNo, zap.Error(err))...)
+		return true, nil
+	}
+
+	if !isDangerous {
+		return true, nil
+	}
+
+	if a.userInputProvider == nil {
+		a.log.Warn("Опасное действие обнаружено, но провайдер пользовательского ввода не настроен", a.contextFields(nil, stepNo, zap.String("action", plan.Action))...)
+		return true, nil
+	}
+
+	confirmationMsg := a.securityChecker.GetConfirmationMessage(plan.Action, plan.Selector, plan.Value, plan.Reasoning, llmMessage)
+	answer, err := a.userInputProvider.AskUser(ctx, confirmationMsg)
+	if err != nil {
+		return false, fmt.Errorf("ошибка запроса подтверждения: %w", err)
+	}
+
+	answerLower := strings.ToLower(strings.TrimSpace(answer))
+	if answerLower != "yes" && answerLower != "y" && answerLower != "да" && answerLower != "д" {
+		a.log.Info("Пользователь отменил опасное действие", a.contextFields(nil, stepNo, zap.String("action", plan.Action))...)
+		fmt.Printf("[Шаг %d] Действие отменено пользователем\n", stepNo)
+		return false, nil
+	}
+
+	a.log.Info("Пользователь подтвердил опасное действие", a.contextFields(nil, stepNo, zap.String("action", plan.Action))...)
+	return true, nil
+}
+
+func (a *Agent) createStepRecord(task *database.Task, stepNo int, plan *llm.StepPlan, result string) *database.AgentStep {
+	return &database.AgentStep{
+		TaskID:         task.ID,
+		StepNo:         stepNo,
+		ActionType:     plan.Action,
+		TargetSelector: a.sanitizer.SanitizeSelector(plan.Selector),
+		Reasoning:      a.sanitizer.Sanitize(plan.Reasoning),
+		Result:         a.sanitizer.Sanitize(result),
+	}
+}
+
+type executeStepsParams struct {
+	ctx        context.Context
+	userInput  string
+	maxSteps   int
+	taskID     *uint
+	saveSteps  bool
+	updateTask bool
+}
+
+func (a *Agent) executeSteps(params executeStepsParams) error {
+	task := &database.Task{}
+	if params.taskID != nil {
+		t, err := a.repo.GetTaskByID(*params.taskID)
+		if err != nil {
+			return fmt.Errorf("ошибка получения задачи: %w", err)
+		}
+		task = t
+	}
+
+	for stepNo := 1; stepNo <= params.maxSteps; stepNo++ {
+		// Проверка отмены контекста
+		select {
+		case <-params.ctx.Done():
+			a.log.Info("Выполнение задачи отменено через контекст", a.contextFields(params.taskID, stepNo)...)
+			return params.ctx.Err()
+		default:
+		}
+
+		pageContext, err := a.getPageContext(params.ctx)
+		if err != nil {
+			a.log.Warn("Ошибка получения контекста страницы", a.contextFields(params.taskID, stepNo, zap.Error(err))...)
+			pageContext = ""
+		}
+
+		plan, err := a.getPlanForStep(params.ctx, params.userInput, pageContext, params.taskID)
+		if err != nil {
+			a.log.Error("Ошибка планирования действия", a.contextFields(params.taskID, stepNo, zap.Error(err))...)
+			if isCriticalError(err) {
+				return fmt.Errorf("критичная ошибка планирования: %w", err)
+			}
+			continue
+		}
+
+		if plan.Action == "complete" {
+			if params.saveSteps {
+				step := a.createStepRecord(task, stepNo, plan, plan.Reasoning)
+				if err := a.repo.CreateStep(step); err != nil {
+					a.log.Error("Ошибка сохранения шага", a.contextFields(params.taskID, stepNo, zap.Error(err))...)
+				}
+			}
+			if params.updateTask && params.taskID != nil {
+				if err := a.repo.UpdateTaskStatus(*params.taskID, "completed", a.sanitizer.Sanitize(plan.Reasoning)); err != nil {
+					a.log.Error("Ошибка обновления статуса", a.contextFields(params.taskID, stepNo, zap.Error(err))...)
+				}
+			}
+			return nil
+		}
+
+		approved, err := a.checkSecurityAndConfirm(params.ctx, plan, stepNo)
+		if err != nil {
+			if params.saveSteps {
+				step := a.createStepRecord(task, stepNo, plan, "Ошибка запроса подтверждения")
+				if err := a.repo.CreateStep(step); err != nil {
+					a.log.Error("Ошибка сохранения шага", a.contextFields(params.taskID, stepNo, zap.Error(err))...)
+				}
+			}
+			return err
+		}
+		if !approved {
+			if params.saveSteps {
+				step := a.createStepRecord(task, stepNo, plan, "Действие отменено пользователем")
+				if err := a.repo.CreateStep(step); err != nil {
+					a.log.Error("Ошибка сохранения шага", a.contextFields(params.taskID, stepNo, zap.Error(err))...)
+				}
+			}
+			continue
+		}
+
+		result, err := a.executeActionWithRetry(params.ctx, plan)
+		if err != nil {
+			actionErr := classifyError(plan.Action, err)
+			errorMsg := fmt.Sprintf("Ошибка: %v", err)
+			a.log.Error("Ошибка выполнения действия", a.contextFields(params.taskID, stepNo,
+				zap.String("action", plan.Action),
+				zap.Error(err),
+				zap.String("error_type", actionErr.Type.String()))...)
+
+			if params.saveSteps {
+				step := a.createStepRecord(task, stepNo, plan, errorMsg)
+				if err := a.repo.CreateStep(step); err != nil {
+					a.log.Error("Ошибка сохранения шага", a.contextFields(params.taskID, stepNo, zap.Error(err))...)
+				}
+			}
+
+			if isCriticalError(err) {
+				return fmt.Errorf("критичная ошибка выполнения действия: %w", err)
+			}
+
+			a.log.Warn("Продолжаем работу после некритичной ошибки", a.contextFields(params.taskID, stepNo,
+				zap.String("action", plan.Action),
+				zap.Error(err))...)
+		} else {
+			if params.saveSteps {
+				step := a.createStepRecord(task, stepNo, plan, result)
+				if err := a.repo.CreateStep(step); err != nil {
+					a.log.Error("Ошибка сохранения шага", a.contextFields(params.taskID, stepNo, zap.Error(err))...)
+				}
+			}
+		}
+
+		a.logStep(stepNo, plan, err)
+	}
+
+	return fmt.Errorf("достигнут лимит шагов (%d)", params.maxSteps)
+}
+
 func (a *Agent) ExecuteTask(ctx context.Context, task *database.Task) error {
 	if err := a.repo.UpdateTaskStatus(task.ID, "running", ""); err != nil {
 		return fmt.Errorf("ошибка обновления статуса задачи: %w", err)
@@ -99,249 +298,39 @@ func (a *Agent) ExecuteTask(ctx context.Context, task *database.Task) error {
 	}
 
 	if a.cfg.UseMultiStep {
-		a.log.Info("Использование multi-step планирования", zap.Int("max_steps", multiStepSize))
+		a.log.Info("Использование multi-step планирования", a.contextFields(&task.ID, 0, zap.Int("max_steps", multiStepSize))...)
 		return a.ExecuteTaskMultiStep(ctx, task.UserInput, multiStepSize)
 	}
 
 	if a.router != nil {
-		snapshot, err := a.browser.GetPageSnapshot(ctx)
-		pageContext := ""
-		if err == nil && snapshot != nil {
-			pageContext = a.limitContextFromSnapshot(snapshot)
-		}
-
+		pageContext, _ := a.getPageContext(ctx)
 		selectedAgent, err := a.router.RouteTask(ctx, task.UserInput, pageContext)
 		if err != nil {
-			a.log.Warn("Ошибка маршрутизации задачи, используем основной агент", zap.Error(err))
+			a.log.Warn("Ошибка маршрутизации задачи, используем основной агент", a.contextFields(&task.ID, 0, zap.Error(err))...)
 		} else {
-			a.log.Info("Задача маршрутизирована", zap.String("agent_type", string(selectedAgent.GetType())))
-			return a.executeTaskString(ctx, task.UserInput, a.maxSteps)
+			a.log.Info("Задача маршрутизирована", a.contextFields(&task.ID, 0, zap.String("agent_type", string(selectedAgent.GetType())))...)
 		}
 	}
 
-	stepNo := 0
-	for stepNo < a.maxSteps {
-		stepNo++
-
-		var pageSnapshot *browser.PageSnapshot
-		err := retryAction(ctx, a.retries, a.retryDelay, func() error {
-			snapshot, err := a.browser.GetPageSnapshot(ctx)
-			if err != nil {
-				return err
-			}
-			pageSnapshot = snapshot
-			return nil
-		})
-		if err != nil {
-			a.log.Error("Ошибка получения snapshot страницы после повторных попыток", zap.Error(err))
-			if isCriticalError(err) {
-				return fmt.Errorf("критичная ошибка получения snapshot: %w", err)
-			}
-			a.log.Warn("Продолжаем работу после некритичной ошибки получения snapshot", zap.Error(err))
-			pageSnapshot = nil
-		}
-
-		var pageContext string
-		if pageSnapshot != nil {
-			pageContext = a.limitContextFromSnapshot(pageSnapshot)
-		} else {
-			htmlContext, err := a.browser.GetPageContext(ctx)
-			if err == nil {
-				pageContext = a.limitContext(htmlContext)
-			}
-		}
-
-		var plan *llm.StepPlan
-		err = retryAction(ctx, a.retries, a.retryDelay, func() error {
-			p, e := a.llmClient.PlanAction(ctx, task.UserInput, pageContext, &task.ID, nil)
-			if e != nil {
-				return e
-			}
-			plan = p
-			return nil
-		})
-		if err != nil {
-			a.log.Error("Ошибка планирования действия после повторных попыток", zap.Error(err))
-			if isCriticalError(err) {
-				return fmt.Errorf("критичная ошибка планирования: %w", err)
-			}
-			a.log.Warn("Пропускаем шаг из-за ошибки планирования", zap.Error(err))
-			continue
-		}
-
-		step := &database.AgentStep{
-			TaskID:         task.ID,
-			StepNo:         stepNo,
-			ActionType:     plan.Action,
-			TargetSelector: a.sanitizer.SanitizeSelector(plan.Selector),
-			Reasoning:      a.sanitizer.Sanitize(plan.Reasoning),
-		}
-
-		if plan.Action == "complete" {
-			step.Result = a.sanitizer.Sanitize(plan.Reasoning)
-			if err := a.repo.CreateStep(step); err != nil {
-				a.log.Error("Ошибка сохранения шага", zap.Error(err))
-			}
-			if err := a.repo.UpdateTaskStatus(task.ID, "completed", a.sanitizer.Sanitize(plan.Reasoning)); err != nil {
-				a.log.Error("Ошибка обновления статуса", zap.Error(err))
-			}
-			return nil
-		}
-
-		isDangerous, llmMessage, err := a.securityChecker.IsDangerousAction(ctx, plan.Action, plan.Selector, plan.Value, plan.Reasoning)
-		if err != nil {
-			a.log.Warn("Ошибка проверки безопасности, продолжаем выполнение", zap.Error(err))
-		} else if isDangerous {
-			if a.userInputProvider == nil {
-				a.log.Warn("Опасное действие обнаружено, но провайдер пользовательского ввода не настроен", zap.String("action", plan.Action))
-			} else {
-				confirmationMsg := a.securityChecker.GetConfirmationMessage(plan.Action, plan.Selector, plan.Value, plan.Reasoning, llmMessage)
-				answer, err := a.userInputProvider.AskUser(ctx, confirmationMsg)
-				if err != nil {
-					step.Result = "Ошибка запроса подтверждения"
-					if err := a.repo.CreateStep(step); err != nil {
-						a.log.Error("Ошибка сохранения шага", zap.Error(err))
-					}
-					return fmt.Errorf("ошибка запроса подтверждения: %w", err)
-				}
-
-				answerLower := strings.ToLower(strings.TrimSpace(answer))
-				if answerLower != "yes" && answerLower != "y" && answerLower != "да" && answerLower != "д" {
-					step.Result = "Действие отменено пользователем"
-					if err := a.repo.CreateStep(step); err != nil {
-						a.log.Error("Ошибка сохранения шага", zap.Error(err))
-					}
-					a.log.Info("Пользователь отменил опасное действие", zap.String("action", plan.Action))
-					fmt.Printf("[Шаг %d] Действие отменено пользователем\n", stepNo)
-					continue
-				}
-
-				a.log.Info("Пользователь подтвердил опасное действие", zap.String("action", plan.Action))
-			}
-		}
-
-		result, err := a.executeActionWithRetry(ctx, plan)
-		if err != nil {
-			actionErr := classifyError(plan.Action, err)
-			step.Result = a.sanitizer.Sanitize(fmt.Sprintf("Ошибка: %v", err))
-			a.log.Error("Ошибка выполнения действия", zap.String("action", plan.Action), zap.Error(err), zap.String("error_type", actionErr.Type.String()))
-
-			if isCriticalError(err) {
-				if err := a.repo.CreateStep(step); err != nil {
-					a.log.Error("Ошибка сохранения шага", zap.Error(err))
-				}
-				return fmt.Errorf("критичная ошибка выполнения действия: %w", err)
-			}
-
-			a.log.Warn("Продолжаем работу после некритичной ошибки", zap.String("action", plan.Action), zap.Error(err))
-		} else {
-			step.Result = a.sanitizer.Sanitize(result)
-		}
-
-		if err := a.repo.CreateStep(step); err != nil {
-			a.log.Error("Ошибка сохранения шага", zap.Error(err))
-		}
-
-		a.logStep(stepNo, plan, err)
-	}
-
-	return fmt.Errorf("достигнут лимит шагов (%d)", a.maxSteps)
+	return a.executeSteps(executeStepsParams{
+		ctx:        ctx,
+		userInput:  task.UserInput,
+		maxSteps:   a.maxSteps,
+		taskID:     &task.ID,
+		saveSteps:  true,
+		updateTask: true,
+	})
 }
 
 func (a *Agent) executeTaskString(ctx context.Context, taskText string, maxSteps int) error {
-	stepNo := 0
-	for stepNo < maxSteps {
-		stepNo++
-
-		var pageSnapshot *browser.PageSnapshot
-		err := retryAction(ctx, a.retries, a.retryDelay, func() error {
-			snapshot, err := a.browser.GetPageSnapshot(ctx)
-			if err != nil {
-				return err
-			}
-			pageSnapshot = snapshot
-			return nil
-		})
-		if err != nil {
-			a.log.Error("Ошибка получения snapshot страницы после повторных попыток", zap.Error(err))
-			if isCriticalError(err) {
-				return fmt.Errorf("критичная ошибка получения snapshot: %w", err)
-			}
-			a.log.Warn("Продолжаем работу после некритичной ошибки получения snapshot", zap.Error(err))
-			pageSnapshot = nil
-		}
-
-		var pageContext string
-		if pageSnapshot != nil {
-			pageContext = a.limitContextFromSnapshot(pageSnapshot)
-		} else {
-			htmlContext, err := a.browser.GetPageContext(ctx)
-			if err == nil {
-				pageContext = a.limitContext(htmlContext)
-			}
-		}
-
-		var plan *llm.StepPlan
-		err = retryAction(ctx, a.retries, a.retryDelay, func() error {
-			p, e := a.llmClient.PlanAction(ctx, taskText, pageContext, nil, nil)
-			if e != nil {
-				return e
-			}
-			plan = p
-			return nil
-		})
-		if err != nil {
-			a.log.Error("Ошибка планирования действия после повторных попыток", zap.Error(err))
-			if isCriticalError(err) {
-				return fmt.Errorf("критичная ошибка планирования: %w", err)
-			}
-			a.log.Warn("Пропускаем шаг из-за ошибки планирования", zap.Error(err))
-			continue
-		}
-
-		if plan.Action == "complete" {
-			return nil
-		}
-
-		isDangerous, llmMessage, err := a.securityChecker.IsDangerousAction(ctx, plan.Action, plan.Selector, plan.Value, plan.Reasoning)
-		if err != nil {
-			a.log.Warn("Ошибка проверки безопасности, продолжаем выполнение", zap.Error(err))
-		} else if isDangerous {
-			if a.userInputProvider == nil {
-				a.log.Warn("Опасное действие обнаружено, но провайдер пользовательского ввода не настроен", zap.String("action", plan.Action))
-			} else {
-				confirmationMsg := a.securityChecker.GetConfirmationMessage(plan.Action, plan.Selector, plan.Value, plan.Reasoning, llmMessage)
-				answer, err := a.userInputProvider.AskUser(ctx, confirmationMsg)
-				if err != nil {
-					return fmt.Errorf("ошибка запроса подтверждения: %w", err)
-				}
-
-				answerLower := strings.ToLower(strings.TrimSpace(answer))
-				if answerLower != "yes" && answerLower != "y" && answerLower != "да" && answerLower != "д" {
-					a.log.Info("Пользователь отменил опасное действие", zap.String("action", plan.Action))
-					fmt.Printf("[Шаг %d] Действие отменено пользователем\n", stepNo)
-					continue
-				}
-
-				a.log.Info("Пользователь подтвердил опасное действие", zap.String("action", plan.Action))
-			}
-		}
-
-		_, err = a.executeActionWithRetry(ctx, plan)
-		if err != nil {
-			a.log.Error("Ошибка выполнения действия", zap.String("action", plan.Action), zap.Error(err))
-
-			if isCriticalError(err) {
-				return fmt.Errorf("критичная ошибка выполнения действия: %w", err)
-			}
-
-			a.log.Warn("Продолжаем работу после некритичной ошибки", zap.String("action", plan.Action), zap.Error(err))
-		}
-
-		a.logStep(stepNo, plan, err)
-	}
-
-	return fmt.Errorf("достигнут лимит шагов (%d)", maxSteps)
+	return a.executeSteps(executeStepsParams{
+		ctx:        ctx,
+		userInput:  taskText,
+		maxSteps:   maxSteps,
+		taskID:     nil,
+		saveSteps:  false,
+		updateTask: false,
+	})
 }
 
 func (a *Agent) logStep(stepNo int, plan *llm.StepPlan, err error) {

@@ -1,7 +1,9 @@
 package config
 
 import (
+	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -77,7 +79,78 @@ func Load() (*Cfg, error) {
 		},
 	}
 
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("невалидная конфигурация: %w", err)
+	}
+
 	return cfg, nil
+}
+
+// Validate проверяет корректность конфигурации
+func (c *Cfg) Validate() error {
+	var errors []string
+
+	// Проверка обязательных полей Database
+	if c.Database.Host == "" {
+		errors = append(errors, "DB_HOST обязателен")
+	}
+	if c.Database.Port == "" {
+		errors = append(errors, "DB_PORT обязателен")
+	} else {
+		if port, err := strconv.Atoi(c.Database.Port); err != nil || port < 1 || port > 65535 {
+			errors = append(errors, "DB_PORT должен быть числом от 1 до 65535")
+		}
+	}
+	if c.Database.Name == "" {
+		errors = append(errors, "DB_NAME обязателен")
+	}
+	if c.Database.User == "" {
+		errors = append(errors, "DB_USER обязателен")
+	}
+	// Password может быть пустым для локальной разработки
+
+	// Проверка Logger
+	validEnvs := map[string]bool{"dev": true, "prod": true, "test": true}
+	if !validEnvs[c.Logger.Env] {
+		errors = append(errors, "ENV должен быть одним из: dev, prod, test")
+	}
+
+	validLevels := map[string]bool{"debug": true, "info": true, "warn": true, "error": true}
+	if !validLevels[c.Logger.Level] {
+		errors = append(errors, "LOG_LEVEL должен быть одним из: debug, info, warn, error")
+	}
+
+	// Проверка OpenAI (опционально, но если указан - должен быть валидным)
+	if c.OpenAI.KeyAI != "" {
+		if !strings.HasPrefix(c.OpenAI.KeyAI, "sk-") {
+			errors = append(errors, "OPENAI_API_KEY должен начинаться с 'sk-'")
+		}
+	}
+	if c.OpenAI.MaxTokens < 100 || c.OpenAI.MaxTokens > 128000 {
+		errors = append(errors, "OPENAI_MAX_TOKENS должен быть от 100 до 128000")
+	}
+
+	// Проверка Browser
+	if c.Browser.UserDataDir != "" {
+		// Если указан абсолютный путь - проверяем что родительская директория существует
+		if filepath.IsAbs(c.Browser.UserDataDir) {
+			parentDir := filepath.Dir(c.Browser.UserDataDir)
+			if _, err := os.Stat(parentDir); os.IsNotExist(err) {
+				errors = append(errors, fmt.Sprintf("родительская директория для PW_USER_DATA_DIR не существует: %s", parentDir))
+			}
+		}
+	}
+
+	// Проверка Migrations
+	if c.Migrations.Path == "" {
+		errors = append(errors, "MIGRATIONS_PATH обязателен")
+	}
+
+	if len(errors) > 0 {
+		return fmt.Errorf("ошибки валидации:\n  - %s", strings.Join(errors, "\n  - "))
+	}
+
+	return nil
 }
 
 func env(key, defaultValue string) string {
