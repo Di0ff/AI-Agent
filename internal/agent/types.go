@@ -26,6 +26,10 @@ type Agent struct {
 	userInputProvider UserInputProvider
 	securityChecker   *SecurityChecker
 	sanitizer         *sanitizer.DataSanitizer
+	router            *AgentRouter
+	cfg               Config
+	memory            *AgentMemory
+	circuitBreakers   *CircuitBreakerPool
 }
 
 type Config struct {
@@ -34,6 +38,11 @@ type Config struct {
 	Retries           int
 	RetryDelay        time.Duration
 	UserInputProvider UserInputProvider
+	UseSubAgents      bool
+	ConfidenceMin     float64
+	UseMultiStep      bool
+	MultiStepSize     int
+	UseMemory         bool
 }
 
 type ElementPriority int

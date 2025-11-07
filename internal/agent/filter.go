@@ -8,11 +8,12 @@ func (a *Agent) prioritizeElements(elements []PageElement) []PageElement {
 			elements[i].Priority = PriorityHigh
 		}
 
-		importantKeywords := []string{"button", "submit", "login", "search", "menu", "nav", "form"}
-		textLower := strings.ToLower(elements[i].Text)
-		for _, keyword := range importantKeywords {
-			if strings.Contains(textLower, keyword) {
-				elements[i].Priority = PriorityCritical
+		semanticTags := []string{"button", "a", "input", "select", "textarea", "nav", "form"}
+		for _, tag := range semanticTags {
+			if strings.EqualFold(elements[i].Tag, tag) {
+				if elements[i].Priority < PriorityHigh {
+					elements[i].Priority = PriorityHigh
+				}
 				break
 			}
 		}

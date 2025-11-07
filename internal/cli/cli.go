@@ -27,7 +27,7 @@ type CLI struct {
 
 func (c *CLI) Run(ctx context.Context) {
 	fmt.Println("AI-Agent консоль запущена")
-	fmt.Println("Команды: task <текст>, tasks, status <id>, show <id>, run <task_id>, test-llm <задача>, open <url>, exit")
+	fmt.Println("Команды: task <текст>, tasks, status <id>, show <id>, run <task_id>, logs <task_id>, test-llm <задача>, open <url>, exit")
 
 	for {
 		fmt.Print("> ")
@@ -122,6 +122,54 @@ func (c *CLI) Run(ctx context.Context) {
 			}
 			fmt.Println()
 
+		case strings.HasPrefix(line, "logs "):
+			idStr := strings.TrimPrefix(line, "logs ")
+			id, err := strconv.Atoi(idStr)
+			if err != nil {
+				fmt.Println("Неверный ID задачи")
+				continue
+			}
+			task, err := c.repo.GetTaskByID(uint(id))
+			if err != nil {
+				fmt.Println("Задача не найдена")
+				continue
+			}
+
+			fmt.Printf("\n=== Логи задачи #%d ===\n", task.ID)
+			fmt.Printf("Задача: %s\n", task.UserInput)
+			fmt.Printf("Статус: %s\n\n", task.Status)
+
+			steps, err := c.repo.GetStepsByTaskID(task.ID)
+			if err != nil {
+				c.log.Error("Ошибка получения шагов", zap.Error(err))
+				fmt.Println("Ошибка получения шагов")
+				continue
+			}
+
+			if len(steps) == 0 {
+				fmt.Println("Шаги не найдены")
+				continue
+			}
+
+			for _, step := range steps {
+				fmt.Printf("[%s] %s", step.CreatedAt.Format("15:04:05"), step.ActionType)
+				if step.TargetSelector != "" {
+					fmt.Printf(" → %s", step.TargetSelector)
+				}
+				fmt.Println()
+				if step.Reasoning != "" && len(step.Reasoning) < 100 {
+					fmt.Printf("  %s\n", step.Reasoning)
+				}
+				if step.Result != "" {
+					if strings.HasPrefix(step.Result, "Ошибка") {
+						fmt.Printf("  [ОШИБКА] %s\n", step.Result)
+					} else if len(step.Result) < 80 {
+						fmt.Printf("  [OK] %s\n", step.Result)
+					}
+				}
+			}
+			fmt.Println()
+
 		case strings.HasPrefix(line, "run "):
 			if c.agent == nil {
 				fmt.Println("Агент не инициализирован")
@@ -202,7 +250,7 @@ func (c *CLI) Run(ctx context.Context) {
 			fmt.Println("Браузер закрыт")
 
 		default:
-			fmt.Println("Неизвестная команда. Доступно: task <текст>, tasks, status <id>, show <id>, run <task_id>, test-llm <задача>, open <url>, exit")
+			fmt.Println("Неизвестная команда. Доступно: task <текст>, tasks, status <id>, show <id>, run <task_id>, logs <task_id>, test-llm <задача>, open <url>, exit")
 		}
 	}
 }

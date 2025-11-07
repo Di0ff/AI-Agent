@@ -83,7 +83,11 @@ func classifyError(action string, err error) *ActionError {
 	}
 }
 
-func retryAction(ctx context.Context, maxRetries int, delay time.Duration, fn func() error) error {
+func retryAction(ctx context.Context, maxRetries int, baseDelay time.Duration, fn func() error) error {
+	return RetryWithExponentialBackoff(ctx, maxRetries, baseDelay, fn)
+}
+
+func retryActionOld(ctx context.Context, maxRetries int, delay time.Duration, fn func() error) error {
 	var lastErr error
 	for i := 0; i < maxRetries; i++ {
 		if i > 0 {

@@ -17,6 +17,10 @@ func New(cfg Config) *PlaywrightBrowser {
 	}
 }
 
+func (b *PlaywrightBrowser) SetPopupDetector(detector PopupDetector) {
+	b.popupDetector = detector
+}
+
 func (b *PlaywrightBrowser) Launch(ctx context.Context) error {
 	pw, err := playwright.Run()
 	if err != nil {
@@ -88,7 +92,20 @@ func (b *PlaywrightBrowser) Click(ctx context.Context, selector string) error {
 		return fmt.Errorf("ошибка закрытия попапов перед кликом: %w", err)
 	}
 
-	return b.page.Click(selector)
+	if err := b.ScrollToElement(ctx, selector); err != nil {
+		return fmt.Errorf("ошибка прокрутки к элементу: %w", err)
+	}
+
+	err := b.page.Click(selector)
+	if err != nil {
+		return err
+	}
+
+	if err := b.WaitForNetworkIdle(ctx, 2*time.Second); err != nil {
+		return nil
+	}
+
+	return nil
 }
 
 func (b *PlaywrightBrowser) Type(ctx context.Context, selector, text string) error {
@@ -102,6 +119,10 @@ func (b *PlaywrightBrowser) Type(ctx context.Context, selector, text string) err
 
 	if err := b.ClosePopups(ctx); err != nil {
 		return fmt.Errorf("ошибка закрытия попапов перед вводом: %w", err)
+	}
+
+	if err := b.ScrollToElement(ctx, selector); err != nil {
+		return fmt.Errorf("ошибка прокрутки к элементу: %w", err)
 	}
 
 	return b.page.Fill(selector, text)

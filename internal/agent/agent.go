@@ -37,7 +37,11 @@ func New(br browser.Browser, llmClient llm.LLMClient, repo *database.TaskReposit
 	if cfg.RetryDelay == 0 {
 		cfg.RetryDelay = 2 * time.Second
 	}
-	return &Agent{
+	if cfg.ConfidenceMin == 0 {
+		cfg.ConfidenceMin = 0.7
+	}
+
+	agent := &Agent{
 		browser:           br,
 		llmClient:         llmClient,
 		repo:              repo,
@@ -49,7 +53,34 @@ func New(br browser.Browser, llmClient llm.LLMClient, repo *database.TaskReposit
 		userInputProvider: cfg.UserInputProvider,
 		securityChecker:   NewSecurityChecker(llmClient),
 		sanitizer:         getSanitizer(llmClient),
+		cfg:               cfg,
 	}
+
+	if cfg.UseSubAgents {
+		router := NewAgentRouter(llmClient, cfg.ConfidenceMin)
+
+		navAgent := NewNavigationAgent(agent)
+		formAgent := NewFormAgent(agent)
+		extractionAgent := NewExtractionAgent(agent)
+		interactionAgent := NewInteractionAgent(agent)
+
+		router.RegisterAgent(navAgent)
+		router.RegisterAgent(formAgent)
+		router.RegisterAgent(extractionAgent)
+		router.RegisterAgent(interactionAgent)
+		router.SetDefaultAgent(navAgent)
+
+		agent.router = router
+	}
+
+	if cfg.UseMemory {
+		memory := NewAgentMemory(repo)
+		agent.memory = memory
+	}
+
+	agent.circuitBreakers = NewCircuitBreakerPool()
+
+	return agent
 }
 
 func (a *Agent) ExecuteTask(ctx context.Context, task *database.Task) error {
@@ -62,29 +93,63 @@ func (a *Agent) ExecuteTask(ctx context.Context, task *database.Task) error {
 	}
 	defer a.browser.Close()
 
+	multiStepSize := 5
+	if a.cfg.MultiStepSize > 0 {
+		multiStepSize = a.cfg.MultiStepSize
+	}
+
+	if a.cfg.UseMultiStep {
+		a.log.Info("Использование multi-step планирования", zap.Int("max_steps", multiStepSize))
+		return a.ExecuteTaskMultiStep(ctx, task.UserInput, multiStepSize)
+	}
+
+	if a.router != nil {
+		snapshot, err := a.browser.GetPageSnapshot(ctx)
+		pageContext := ""
+		if err == nil && snapshot != nil {
+			pageContext = a.limitContextFromSnapshot(snapshot)
+		}
+
+		selectedAgent, err := a.router.RouteTask(ctx, task.UserInput, pageContext)
+		if err != nil {
+			a.log.Warn("Ошибка маршрутизации задачи, используем основной агент", zap.Error(err))
+		} else {
+			a.log.Info("Задача маршрутизирована", zap.String("agent_type", string(selectedAgent.GetType())))
+			return a.executeTaskString(ctx, task.UserInput, a.maxSteps)
+		}
+	}
+
 	stepNo := 0
 	for stepNo < a.maxSteps {
 		stepNo++
 
-		var pageContext string
+		var pageSnapshot *browser.PageSnapshot
 		err := retryAction(ctx, a.retries, a.retryDelay, func() error {
-			ctx, err := a.browser.GetPageContext(ctx)
+			snapshot, err := a.browser.GetPageSnapshot(ctx)
 			if err != nil {
 				return err
 			}
-			pageContext = ctx
+			pageSnapshot = snapshot
 			return nil
 		})
 		if err != nil {
-			a.log.Error("Ошибка получения контекста страницы после повторных попыток", zap.Error(err))
+			a.log.Error("Ошибка получения snapshot страницы после повторных попыток", zap.Error(err))
 			if isCriticalError(err) {
-				return fmt.Errorf("критичная ошибка получения контекста: %w", err)
+				return fmt.Errorf("критичная ошибка получения snapshot: %w", err)
 			}
-			a.log.Warn("Продолжаем работу после некритичной ошибки получения контекста", zap.Error(err))
-			pageContext = ""
+			a.log.Warn("Продолжаем работу после некритичной ошибки получения snapshot", zap.Error(err))
+			pageSnapshot = nil
 		}
 
-		pageContext = a.limitContext(pageContext)
+		var pageContext string
+		if pageSnapshot != nil {
+			pageContext = a.limitContextFromSnapshot(pageSnapshot)
+		} else {
+			htmlContext, err := a.browser.GetPageContext(ctx)
+			if err == nil {
+				pageContext = a.limitContext(htmlContext)
+			}
+		}
 
 		stepID := uint(stepNo)
 		var plan *llm.StepPlan
@@ -178,13 +243,119 @@ func (a *Agent) ExecuteTask(ctx context.Context, task *database.Task) error {
 			a.log.Error("Ошибка сохранения шага", zap.Error(err))
 		}
 
-		fmt.Printf("[Шаг %d] %s: %s\n", stepNo, plan.Action, plan.Reasoning)
-		if err != nil {
-			fmt.Printf("  Ошибка: %v\n", err)
-		}
+		a.logStep(stepNo, plan, err)
 	}
 
 	return fmt.Errorf("достигнут лимит шагов (%d)", a.maxSteps)
+}
+
+func (a *Agent) executeTaskString(ctx context.Context, taskText string, maxSteps int) error {
+	stepNo := 0
+	for stepNo < maxSteps {
+		stepNo++
+
+		var pageSnapshot *browser.PageSnapshot
+		err := retryAction(ctx, a.retries, a.retryDelay, func() error {
+			snapshot, err := a.browser.GetPageSnapshot(ctx)
+			if err != nil {
+				return err
+			}
+			pageSnapshot = snapshot
+			return nil
+		})
+		if err != nil {
+			a.log.Error("Ошибка получения snapshot страницы после повторных попыток", zap.Error(err))
+			if isCriticalError(err) {
+				return fmt.Errorf("критичная ошибка получения snapshot: %w", err)
+			}
+			a.log.Warn("Продолжаем работу после некритичной ошибки получения snapshot", zap.Error(err))
+			pageSnapshot = nil
+		}
+
+		var pageContext string
+		if pageSnapshot != nil {
+			pageContext = a.limitContextFromSnapshot(pageSnapshot)
+		} else {
+			htmlContext, err := a.browser.GetPageContext(ctx)
+			if err == nil {
+				pageContext = a.limitContext(htmlContext)
+			}
+		}
+
+		stepID := uint(stepNo)
+		var plan *llm.StepPlan
+		err = retryAction(ctx, a.retries, a.retryDelay, func() error {
+			p, e := a.llmClient.PlanAction(ctx, taskText, pageContext, nil, &stepID)
+			if e != nil {
+				return e
+			}
+			plan = p
+			return nil
+		})
+		if err != nil {
+			a.log.Error("Ошибка планирования действия после повторных попыток", zap.Error(err))
+			if isCriticalError(err) {
+				return fmt.Errorf("критичная ошибка планирования: %w", err)
+			}
+			a.log.Warn("Пропускаем шаг из-за ошибки планирования", zap.Error(err))
+			continue
+		}
+
+		if plan.Action == "complete" {
+			return nil
+		}
+
+		isDangerous, llmMessage, err := a.securityChecker.IsDangerousAction(ctx, plan.Action, plan.Selector, plan.Value, plan.Reasoning)
+		if err != nil {
+			a.log.Warn("Ошибка проверки безопасности, продолжаем выполнение", zap.Error(err))
+		} else if isDangerous {
+			if a.userInputProvider == nil {
+				a.log.Warn("Опасное действие обнаружено, но провайдер пользовательского ввода не настроен", zap.String("action", plan.Action))
+			} else {
+				confirmationMsg := a.securityChecker.GetConfirmationMessage(plan.Action, plan.Selector, plan.Value, plan.Reasoning, llmMessage)
+				answer, err := a.userInputProvider.AskUser(ctx, confirmationMsg)
+				if err != nil {
+					return fmt.Errorf("ошибка запроса подтверждения: %w", err)
+				}
+
+				answerLower := strings.ToLower(strings.TrimSpace(answer))
+				if answerLower != "yes" && answerLower != "y" && answerLower != "да" && answerLower != "д" {
+					a.log.Info("Пользователь отменил опасное действие", zap.String("action", plan.Action))
+					fmt.Printf("[Шаг %d] Действие отменено пользователем\n", stepNo)
+					continue
+				}
+
+				a.log.Info("Пользователь подтвердил опасное действие", zap.String("action", plan.Action))
+			}
+		}
+
+		_, err = a.executeActionWithRetry(ctx, plan)
+		if err != nil {
+			a.log.Error("Ошибка выполнения действия", zap.String("action", plan.Action), zap.Error(err))
+
+			if isCriticalError(err) {
+				return fmt.Errorf("критичная ошибка выполнения действия: %w", err)
+			}
+
+			a.log.Warn("Продолжаем работу после некритичной ошибки", zap.String("action", plan.Action), zap.Error(err))
+		}
+
+		a.logStep(stepNo, plan, err)
+	}
+
+	return fmt.Errorf("достигнут лимит шагов (%d)", maxSteps)
+}
+
+func (a *Agent) logStep(stepNo int, plan *llm.StepPlan, err error) {
+	if err != nil {
+		fmt.Printf("[Шаг %d] %s - ОШИБКА\n", stepNo, plan.Action)
+	} else {
+		reasoning := plan.Reasoning
+		if len(reasoning) > 60 {
+			reasoning = reasoning[:57] + "..."
+		}
+		fmt.Printf("[Шаг %d] %s: %s\n", stepNo, plan.Action, reasoning)
+	}
 }
 
 func (a *Agent) executeActionWithRetry(ctx context.Context, plan *llm.StepPlan) (string, error) {

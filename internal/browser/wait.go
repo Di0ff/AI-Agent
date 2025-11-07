@@ -53,6 +53,42 @@ func (b *PlaywrightBrowser) ClosePopups(ctx context.Context) error {
 		return fmt.Errorf("браузер не запущен")
 	}
 
+	if b.popupDetector == nil {
+		return b.closePopupsLegacy(ctx)
+	}
+
+	snapshot, err := b.GetPageSnapshot(ctx)
+	if err != nil {
+		return b.closePopupsLegacy(ctx)
+	}
+
+	popupInfo, err := b.popupDetector.DetectPopup(ctx, snapshot)
+	if err != nil {
+		return b.closePopupsLegacy(ctx)
+	}
+
+	if !popupInfo.HasPopup || popupInfo.CloseSelector == "" {
+		return nil
+	}
+
+	element, err := b.page.QuerySelector(popupInfo.CloseSelector)
+	if err != nil || element == nil {
+		return nil
+	}
+
+	isVisible, err := element.IsVisible()
+	if err != nil || !isVisible {
+		return nil
+	}
+
+	if err := element.Click(); err == nil {
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	return nil
+}
+
+func (b *PlaywrightBrowser) closePopupsLegacy(ctx context.Context) error {
 	popupSelectors := []string{
 		"[role='dialog'] button[aria-label*='close' i]",
 		"[role='dialog'] button[aria-label*='закрыть' i]",

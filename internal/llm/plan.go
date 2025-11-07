@@ -14,16 +14,21 @@ func formatPrompt(systemMsg, userPrompt string) string {
 func (c *Client) PlanAction(ctx context.Context, task string, pageContext string, taskID *uint, stepID *uint) (*StepPlan, error) {
 	tools := getTools()
 
-	prompt := fmt.Sprintf(`Ты - AI агент, который управляет браузером для выполнения задач пользователя.
+	category := DetectTaskCategory(task)
+	systemMsg := GetSystemPromptForCategory(category)
+	fewShot := GetFewShotExamplesForCategory(category)
+	guidance := GetTaskSpecificGuidance(category)
 
-Текущая задача: %s
+	prompt := fmt.Sprintf(`Текущая задача: %s
 
 Контекст страницы:
 %s
 
-Определи следующее действие для выполнения задачи. Используй доступные инструменты для взаимодействия с браузером.`, task, pageContext)
+%s
 
-	systemMsg := "Ты - AI агент для автоматизации браузера. Анализируй страницу и выбирай правильные действия для выполнения задачи пользователя."
+%s
+
+Определи следующее действие для выполнения задачи. Используй доступные инструменты для взаимодействия с браузером.`, task, pageContext, fewShot, guidance)
 
 	resp, err := c.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
 		Model: c.model,
