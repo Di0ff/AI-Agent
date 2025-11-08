@@ -120,10 +120,54 @@ func (a *Agent) getPageContext(ctx context.Context) (string, error) {
 	return a.limitContext(htmlContext), nil
 }
 
+func (a *Agent) performReasoning(ctx context.Context, userInput, pageContext string, taskID *uint, stepNo int) (*llm.ReasoningStep, error) {
+	// Проверяем есть ли memory и релевантные patterns
+	if a.memory != nil && a.cfg.UseMemory {
+		// Пытаемся найти релевантный опыт из памяти
+		// TODO: В будущем добавить поиск relevant reasoning patterns из memory
+		// Пока используем обычный Reason
+	}
+
+	// Выполняем reasoning с retry logic
+	var reasoning *llm.ReasoningStep
+	err := retryAction(ctx, a.retries, a.retryDelay, func() error {
+		r, e := a.llmClient.Reason(ctx, userInput, pageContext, a.reasoningHistory, taskID, nil)
+		if e != nil {
+			return e
+		}
+		reasoning = r
+		return nil
+	})
+
+	return reasoning, err
+}
+
+// performBasicReflection выполняет базовую рефлексию после действия.
+// Это упрощенная версия - полная рефлексия с LLM анализом будет добавлена в Фазе 4.
+func (a *Agent) performBasicReflection(stepNo int, plan *llm.StepPlan, result string, execErr error) {
+	// Базовая рефлексия
+	if execErr != nil {
+		// TODO (Фаза 4): Добавить LLM-based анализ ошибки
+		// TODO (Фаза 4): Обновить reasoning history с результатом
+		// TODO (Фаза 4): Сохранить в Memory как failed pattern
+	} else {
+		// TODO (Фаза 4): Добавить LLM-based оценку успешности
+		// TODO (Фаза 4): Проверить достигнута ли цель шага
+		// TODO (Фаза 4): Сохранить в Memory как successful pattern
+	}
+}
+
 func (a *Agent) getPlanForStep(ctx context.Context, userInput, pageContext string, taskID *uint) (*llm.StepPlan, error) {
 	var plan *llm.StepPlan
 	err := retryAction(ctx, a.retries, a.retryDelay, func() error {
-		p, e := a.llmClient.PlanAction(ctx, userInput, pageContext, taskID, nil)
+		// Получаем последний reasoning step для передачи в планирование
+		var latestReasoning *llm.ReasoningStep
+		if a.reasoningHistory != nil {
+			latestReasoning = a.reasoningHistory.GetLastStep()
+		}
+
+		// Используем новый метод PlanActionWithReasoning для ReAct pattern
+		p, e := a.llmClient.PlanActionWithReasoning(ctx, userInput, pageContext, latestReasoning, taskID, nil)
 		if e != nil {
 			return e
 		}
@@ -196,6 +240,9 @@ func (a *Agent) executeSteps(params executeStepsParams) error {
 		task = t
 	}
 
+	// Инициализация reasoning history для этой задачи (ReAct pattern)
+	a.reasoningHistory = &llm.ReasoningHistory{}
+
 	for stepNo := 1; stepNo <= params.maxSteps; stepNo++ {
 		// Проверка отмены контекста
 		select {
@@ -211,6 +258,28 @@ func (a *Agent) executeSteps(params executeStepsParams) error {
 			pageContext = ""
 		}
 
+		// ========================================
+		// ФАЗА 1: REASONING (новое!)
+		// Явное рассуждение перед планированием действия
+		// ========================================
+		reasoning, err := a.performReasoning(params.ctx, params.userInput, pageContext, params.taskID, stepNo)
+		if err != nil {
+			a.log.Warn("Ошибка reasoning, продолжаем с планированием", a.contextFields(params.taskID, stepNo, zap.Error(err))...)
+			// Не критично - можем продолжить без explicit reasoning
+		} else {
+			// Добавляем reasoning в историю
+			a.reasoningHistory.AddStep(*reasoning)
+
+			// Если reasoning говорит что нужен user input - обработаем это
+			if reasoning.RequiresUserInput && a.userInputProvider != nil {
+				// В будущем можно добавить автоматический ask_user action здесь
+			}
+		}
+
+		// ========================================
+		// ФАЗА 2: PLANNING
+		// Планирование действия (теперь с учетом reasoning)
+		// ========================================
 		plan, err := a.getPlanForStep(params.ctx, params.userInput, pageContext, params.taskID)
 		if err != nil {
 			a.log.Error("Ошибка планирования действия", a.contextFields(params.taskID, stepNo, zap.Error(err))...)
@@ -285,6 +354,12 @@ func (a *Agent) executeSteps(params executeStepsParams) error {
 					a.log.Error("Ошибка сохранения шага", a.contextFields(params.taskID, stepNo, zap.Error(err))...)
 				}
 			}
+
+			// ========================================
+			// ФАЗА 3: REFLECTION (базовая версия)
+			// Рефлексия после успешного выполнения действия
+			// ========================================
+			a.performBasicReflection(stepNo, plan, result, err)
 		}
 
 		a.logStep(stepNo, plan, err)

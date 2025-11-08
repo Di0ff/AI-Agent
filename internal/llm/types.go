@@ -13,7 +13,19 @@ type Logger interface {
 // LLMClient определяет интерфейс для взаимодействия с LLM.
 // Все методы поддерживают контекст для отмены и логирование запросов.
 type LLMClient interface {
-	// PlanAction планирует следующее действие на основе задачи и контекста страницы.
+	// Reason выполняет фазу явного рассуждения перед планированием действия (ReAct pattern).
+	// Агент анализирует ситуацию, вырабатывает стратегию и оценивает уверенность.
+	Reason(ctx context.Context, task string, pageContext string, history *ReasoningHistory, taskID *uint, stepID *uint) (*ReasoningStep, error)
+
+	// ReasonWithContext выполняет reasoning с учетом релевантных паттернов из памяти агента.
+	ReasonWithContext(ctx context.Context, task string, pageContext string, history *ReasoningHistory, memoryContext string, taskID *uint, stepID *uint) (*ReasoningStep, error)
+
+	// PlanActionWithReasoning планирует действие с учетом reasoning context (ReAct pattern).
+	// Reasoning направляет планирование - агент планирует на основе выработанной стратегии.
+	PlanActionWithReasoning(ctx context.Context, task string, pageContext string, reasoning *ReasoningStep, taskID *uint, stepID *uint) (*StepPlan, error)
+
+	// PlanAction планирует следующее действие на основе задачи и контекста страницы (legacy).
+	// Для новой архитектуры с ReAct pattern используй PlanActionWithReasoning.
 	PlanAction(ctx context.Context, task string, pageContext string, taskID *uint, stepID *uint) (*StepPlan, error)
 
 	// CheckDangerousAction проверяет является ли действие потенциально опасным.

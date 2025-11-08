@@ -70,8 +70,9 @@ func run() error {
 		Retries:           3,
 		UserInputProvider: userInput,
 		UseSubAgents:      true,
-		UseMultiStep:      true,
+		UseMultiStep:      false, // ОТКЛЮЧЕНО: теперь используется новый Reasoning Layer (ReAct pattern)
 		MultiStepSize:     5,
+		UseMemory:         true, // Включаем Memory для reasoning patterns
 	})
 
 	// Создаём context с поддержкой cancellation

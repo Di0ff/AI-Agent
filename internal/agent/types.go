@@ -39,6 +39,7 @@ type Agent struct {
 	cfg               Config
 	memory            *AgentMemory
 	circuitBreakers   *CircuitBreakerPool
+	reasoningHistory  *llm.ReasoningHistory // История рассуждений для текущей задачи (ReAct pattern)
 }
 
 // Config содержит конфигурацию для агента.

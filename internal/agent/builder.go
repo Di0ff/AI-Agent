@@ -52,7 +52,34 @@ func formatElement(el PageElement) string {
 	if len(el.Text) > 100 {
 		el.Text = el.Text[:100] + "..."
 	}
-	return el.Tag + "[" + el.Selector + "]: " + el.Text
+
+	// Формируем полный селектор правильно
+	var fullSelector string
+
+	if el.Selector == "" {
+		// Пустой селектор - используем только тег
+		fullSelector = el.Tag
+	} else if el.Selector == el.Tag {
+		// Селектор совпадает с тегом - используем как есть
+		fullSelector = el.Tag
+	} else if len(el.Selector) > 0 && (el.Selector[0] == '[' || el.Selector[0] == '#' || el.Selector[0] == '.') {
+		// Селектор начинается с спецсимвола: [attr], #id, .class
+		// Объединяем с тегом напрямую
+		fullSelector = el.Tag + el.Selector
+	} else if strings.Contains(el.Selector, el.Tag) {
+		// Селектор уже содержит тег (например: "a.class" или "button#id")
+		// Используем селектор как есть, без добавления тега
+		fullSelector = el.Selector
+	} else if strings.HasPrefix(el.Selector, ":") {
+		// Псевдо-селектор (:hover, :nth-child)
+		fullSelector = el.Tag + el.Selector
+	} else {
+		// Редкий случай: селектор это что-то другое (может быть имя атрибута)
+		// Оборачиваем в квадратные скобки как атрибутный селектор
+		fullSelector = el.Tag + "[" + el.Selector + "]"
+	}
+
+	return fullSelector + ": " + el.Text
 }
 
 func (a *Agent) chunkContext(context string) string {
