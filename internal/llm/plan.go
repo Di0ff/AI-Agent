@@ -16,8 +16,9 @@ func formatPrompt(systemMsg, userPrompt string) string {
 func (c *Client) PlanActionWithReasoning(ctx context.Context, task string, pageContext string, reasoning *ReasoningStep, taskID *uint, stepID *uint) (*StepPlan, error) {
 	tools := getTools()
 
-	// Используем минимальный unified prompt (без категорий)
-	systemMsg := GetSystemPromptForCategory(CategoryGeneral)
+	// Определяем категорию задачи для использования специализированного промпта
+	category := DetectTaskCategory(task)
+	systemMsg := GetSystemPromptForCategory(category)
 
 	// Формируем prompt с reasoning context
 	prompt := fmt.Sprintf(`Текущая задача: %s

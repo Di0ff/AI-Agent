@@ -70,16 +70,17 @@ func New(br browser.Browser, llmClient llm.LLMClient, repo *database.TaskReposit
 	if cfg.UseSubAgents {
 		router := NewAgentRouter(llmClient, cfg.ConfidenceMin)
 
-		navAgent := NewNavigationAgent(agent)
-		formAgent := NewFormAgent(agent)
-		extractionAgent := NewExtractionAgent(agent)
-		interactionAgent := NewInteractionAgent(agent)
+		// Регистрируем специализированных агентов для трех задач
+		emailAgent := NewEmailSpamAgent(agent)
+		foodAgent := NewFoodDeliveryAgent(agent)
+		jobAgent := NewJobSearchAgent(agent)
 
-		router.RegisterAgent(navAgent)
-		router.RegisterAgent(formAgent)
-		router.RegisterAgent(extractionAgent)
-		router.RegisterAgent(interactionAgent)
-		router.SetDefaultAgent(navAgent)
+		router.RegisterAgent(emailAgent)
+		router.RegisterAgent(foodAgent)
+		router.RegisterAgent(jobAgent)
+
+		// Устанавливаем EmailSpamAgent как дефолтный (можно изменить на любой другой)
+		router.SetDefaultAgent(emailAgent)
 
 		agent.router = router
 	}
@@ -395,6 +396,8 @@ func (a *Agent) ExecuteTask(ctx context.Context, task *database.Task) error {
 			a.log.Warn("Ошибка маршрутизации задачи, используем основной агент", a.contextFields(&task.ID, 0, zap.Error(err))...)
 		} else {
 			a.log.Info("Задача маршрутизирована", a.contextFields(&task.ID, 0, zap.String("agent_type", string(selectedAgent.GetType())))...)
+			// Делегируем выполнение специализированному агенту
+			return selectedAgent.Execute(ctx, task.UserInput, a.maxSteps)
 		}
 	}
 

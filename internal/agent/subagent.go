@@ -11,11 +11,10 @@ type LLMClient = llm.LLMClient
 type TaskType string
 
 const (
-	TaskTypeNavigation  TaskType = "navigation"
-	TaskTypeForm        TaskType = "form"
-	TaskTypeExtraction  TaskType = "extraction"
-	TaskTypeInteraction TaskType = "interaction"
-	TaskTypeGeneral     TaskType = "general"
+	TaskTypeEmailSpam    TaskType = "email_spam"
+	TaskTypeFoodDelivery TaskType = "food_delivery"
+	TaskTypeJobSearch    TaskType = "job_search"
+	TaskTypeGeneral      TaskType = "general"
 )
 
 type SpecializedAgent interface {

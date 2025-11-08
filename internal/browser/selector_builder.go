@@ -2,6 +2,7 @@ package browser
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -208,4 +209,123 @@ func escapeXPath(text string) string {
 	text = strings.ReplaceAll(text, "'", "\\'")
 	text = strings.ReplaceAll(text, "\"", "\\\"")
 	return text
+}
+
+// NormalizeSelector нормализует селектор, преобразуя невалидные синтаксисы в валидные для Playwright.
+// Преобразует jQuery :contains() в Playwright :has-text().
+// Также исправляет селекторы вида "button: Текст" в "button:has-text('Текст')".
+// Возвращает нормализованный селектор и флаг, указывающий, был ли селектор изменен.
+func NormalizeSelector(selector string) (string, bool) {
+	if selector == "" {
+		return selector, false
+	}
+
+	normalized := selector
+	changed := false
+
+	// Исправляем селекторы вида "tag: Текст" или "tag.class: Текст" в "tag:has-text('Текст')"
+	// Это распространенная ошибка LLM - использование двоеточия с пробелом вместо :has-text()
+	// Проверяем паттерн: что-то до двоеточия, затем пробел, затем текст
+	colonSpacePattern := regexp.MustCompile(`^([^:]+):\s+(.+)$`)
+	if colonSpacePattern.MatchString(normalized) {
+		submatch := colonSpacePattern.FindStringSubmatch(normalized)
+		if len(submatch) >= 3 {
+			tagPart := strings.TrimSpace(submatch[1])
+			textPart := strings.TrimSpace(submatch[2])
+			
+			// Проверяем, что это не валидный псевдокласс CSS (например, :hover, :focus, :has-text)
+			// Валидные псевдоклассы не имеют пробела после двоеточия
+			validPseudoClasses := []string{":hover", ":focus", ":active", ":visited", ":link", ":checked", 
+				":disabled", ":enabled", ":first-child", ":last-child", ":nth-child", ":nth-of-type", 
+				":has-text", ":has", ":not", ":contains"}
+			isValidPseudo := false
+			for _, pseudo := range validPseudoClasses {
+				if strings.HasSuffix(tagPart, pseudo) || strings.Contains(normalized, pseudo+"(") {
+					isValidPseudo = true
+					break
+				}
+			}
+			
+			// Если это не валидный псевдокласс, преобразуем в :has-text()
+			if !isValidPseudo && tagPart != "" && textPart != "" {
+				changed = true
+				// Экранируем кавычки в тексте
+				textPart = strings.ReplaceAll(textPart, `"`, `\"`)
+				textPart = strings.ReplaceAll(textPart, `'`, `\'`)
+				normalized = tagPart + `:has-text("` + textPart + `")`
+			}
+		}
+	}
+
+	// Регулярное выражение для поиска :contains("text") с двойными кавычками
+	containsPatternDouble := regexp.MustCompile(`:contains\("([^"]*)"\)`)
+	normalized = containsPatternDouble.ReplaceAllStringFunc(normalized, func(match string) string {
+		changed = true
+		submatch := containsPatternDouble.FindStringSubmatch(match)
+		if len(submatch) >= 2 {
+			text := submatch[1]
+			// Экранируем обратные слеши и кавычки в тексте для Playwright
+			text = strings.ReplaceAll(text, "\\", "\\\\")
+			text = strings.ReplaceAll(text, `"`, `\"`)
+			return `:has-text("` + text + `")`
+		}
+		return match
+	})
+
+	// Регулярное выражение для поиска :contains('text') с одинарными кавычками
+	containsPatternSingle := regexp.MustCompile(`:contains\('([^']*)'\)`)
+	normalized = containsPatternSingle.ReplaceAllStringFunc(normalized, func(match string) string {
+		changed = true
+		submatch := containsPatternSingle.FindStringSubmatch(match)
+		if len(submatch) >= 2 {
+			text := submatch[1]
+			// Экранируем обратные слеши и кавычки в тексте для Playwright
+			text = strings.ReplaceAll(text, "\\", "\\\\")
+			text = strings.ReplaceAll(text, `'`, `\'`)
+			return `:has-text('` + text + `')`
+		}
+		return match
+	})
+
+	// Также обрабатываем случай без кавычек (редко, но возможно)
+	containsPatternNoQuotes := regexp.MustCompile(`:contains\(([^)]+)\)`)
+	normalized = containsPatternNoQuotes.ReplaceAllStringFunc(normalized, func(match string) string {
+		if !strings.Contains(match, `:has-text(`) {
+			changed = true
+			submatch := containsPatternNoQuotes.FindStringSubmatch(match)
+			if len(submatch) >= 2 {
+				text := submatch[1]
+				// Если текст не в кавычках, добавляем кавычки
+				text = strings.TrimSpace(text)
+				return `:has-text("` + text + `")`
+			}
+		}
+		return match
+	})
+
+	return normalized, changed
+}
+
+// ValidateSelector проверяет, что селектор является валидным CSS/Playwright селектором.
+// Возвращает ошибку, если селектор является URL или невалидным.
+func ValidateSelector(selector string) error {
+	if selector == "" {
+		return fmt.Errorf("селектор не может быть пустым")
+	}
+
+	// Проверяем, что селектор не является URL
+	selectorTrimmed := strings.TrimSpace(selector)
+	if strings.HasPrefix(selectorTrimmed, "http://") || strings.HasPrefix(selectorTrimmed, "https://") {
+		return fmt.Errorf("селектор не может быть URL. Для перехода по URL используй действие 'navigate', а не 'click'. Получен URL: %s", selector)
+	}
+
+	// Проверяем, что селектор не начинается с протокола (ftp://, file:// и т.д.)
+	if strings.Contains(selectorTrimmed, "://") {
+		return fmt.Errorf("селектор не может содержать протокол (://). Получен: %s", selector)
+	}
+
+	// Не проверяем формат "tag: Текст" здесь, так как NormalizeSelector исправит это
+	// Валидация должна быть минимальной и проверять только критические ошибки
+
+	return nil
 }

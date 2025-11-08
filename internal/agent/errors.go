@@ -87,32 +87,6 @@ func retryAction(ctx context.Context, maxRetries int, baseDelay time.Duration, f
 	return RetryWithExponentialBackoff(ctx, maxRetries, baseDelay, fn)
 }
 
-func retryActionOld(ctx context.Context, maxRetries int, delay time.Duration, fn func() error) error {
-	var lastErr error
-	for i := 0; i < maxRetries; i++ {
-		if i > 0 {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(delay):
-			}
-		}
-
-		err := fn()
-		if err == nil {
-			return nil
-		}
-
-		lastErr = err
-		actionErr := classifyError("", err)
-		if actionErr.Type == ErrorTypeCritical {
-			return err
-		}
-	}
-
-	return fmt.Errorf("после %d попыток: %w", maxRetries, lastErr)
-}
-
 func isCriticalError(err error) bool {
 	actionErr := classifyError("", err)
 	return actionErr.Type == ErrorTypeCritical

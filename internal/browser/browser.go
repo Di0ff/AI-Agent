@@ -179,6 +179,18 @@ func (b *PlaywrightBrowser) Click(ctx context.Context, selector string) error {
 		return fmt.Errorf("браузер не запущен")
 	}
 
+	// Валидируем селектор (проверяем, что это не URL)
+	if err := ValidateSelector(selector); err != nil {
+		return fmt.Errorf("невалидный селектор: %w", err)
+	}
+
+	// Нормализуем селектор (преобразуем :contains() в :has-text())
+	normalizedSelector, changed := NormalizeSelector(selector)
+	if changed {
+		// Селектор был изменен, используем нормализованную версию
+		selector = normalizedSelector
+	}
+
 	if err := b.WaitForSelector(ctx, selector); err != nil {
 		return fmt.Errorf("элемент не найден: %w", err)
 	}
@@ -187,9 +199,11 @@ func (b *PlaywrightBrowser) Click(ctx context.Context, selector string) error {
 		return fmt.Errorf("ошибка закрытия попапов перед кликом: %w", err)
 	}
 
-	if err := b.ScrollToElement(ctx, selector); err != nil {
-		return fmt.Errorf("ошибка прокрутки к элементу: %w", err)
-	}
+	// Playwright автоматически прокручивает к элементу при клике, поэтому
+	// явная прокрутка не нужна и может вызывать проблемы
+	// if err := b.ScrollToElement(ctx, selector); err != nil {
+	// 	return fmt.Errorf("ошибка прокрутки к элементу: %w", err)
+	// }
 
 	err := page.Click(selector)
 	if err != nil {
@@ -209,6 +223,18 @@ func (b *PlaywrightBrowser) Type(ctx context.Context, selector, text string) err
 		return fmt.Errorf("браузер не запущен")
 	}
 
+	// Валидируем селектор (проверяем, что это не URL)
+	if err := ValidateSelector(selector); err != nil {
+		return fmt.Errorf("невалидный селектор: %w", err)
+	}
+
+	// Нормализуем селектор (преобразуем :contains() в :has-text())
+	normalizedSelector, changed := NormalizeSelector(selector)
+	if changed {
+		// Селектор был изменен, используем нормализованную версию
+		selector = normalizedSelector
+	}
+
 	if err := b.WaitForSelector(ctx, selector); err != nil {
 		return fmt.Errorf("элемент не найден: %w", err)
 	}
@@ -217,9 +243,11 @@ func (b *PlaywrightBrowser) Type(ctx context.Context, selector, text string) err
 		return fmt.Errorf("ошибка закрытия попапов перед вводом: %w", err)
 	}
 
-	if err := b.ScrollToElement(ctx, selector); err != nil {
-		return fmt.Errorf("ошибка прокрутки к элементу: %w", err)
-	}
+	// Playwright автоматически прокручивает к элементу при заполнении, поэтому
+	// явная прокрутка не нужна и может вызывать проблемы
+	// if err := b.ScrollToElement(ctx, selector); err != nil {
+	// 	return fmt.Errorf("ошибка прокрутки к элементу: %w", err)
+	// }
 
 	return page.Fill(selector, text)
 }

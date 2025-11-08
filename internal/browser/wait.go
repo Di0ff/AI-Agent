@@ -14,6 +14,18 @@ func (b *PlaywrightBrowser) WaitForSelector(ctx context.Context, selector string
 		return fmt.Errorf("браузер не запущен")
 	}
 
+	// Валидируем селектор (проверяем, что это не URL)
+	if err := ValidateSelector(selector); err != nil {
+		return fmt.Errorf("невалидный селектор: %w", err)
+	}
+
+	// Нормализуем селектор (преобразуем :contains() в :has-text())
+	normalizedSelector, changed := NormalizeSelector(selector)
+	if changed {
+		// Селектор был изменен, используем нормализованную версию
+		selector = normalizedSelector
+	}
+
 	opts := playwright.PageWaitForSelectorOptions{
 		State:   playwright.WaitForSelectorStateAttached,
 		Timeout: playwright.Float(b.cfg.Timeout.Seconds() * 1000),

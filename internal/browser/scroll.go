@@ -4,11 +4,25 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/playwright-community/playwright-go"
 )
 
 func (b *PlaywrightBrowser) ScrollToElement(ctx context.Context, selector string) error {
 	if b.page == nil {
 		return fmt.Errorf("браузер не запущен")
+	}
+
+	// Валидируем селектор (проверяем, что это не URL)
+	if err := ValidateSelector(selector); err != nil {
+		return fmt.Errorf("невалидный селектор: %w", err)
+	}
+
+	// Нормализуем селектор (преобразуем :contains() в :has-text())
+	normalizedSelector, changed := NormalizeSelector(selector)
+	if changed {
+		// Селектор был изменен, используем нормализованную версию
+		selector = normalizedSelector
 	}
 
 	element, err := b.page.QuerySelector(selector)
@@ -20,35 +34,28 @@ func (b *PlaywrightBrowser) ScrollToElement(ctx context.Context, selector string
 		return fmt.Errorf("элемент с селектором %s не найден", selector)
 	}
 
+	// Проверяем, виден ли элемент (IsVisible проверяет и видимость, и наличие в DOM)
 	isVisible, err := element.IsVisible()
 	if err != nil {
-		return fmt.Errorf("ошибка проверки видимости: %w", err)
+		// Если не можем проверить видимость, все равно пытаемся прокрутить
+		isVisible = false
 	}
 
-	if !isVisible {
-		_, err = element.Evaluate(`el => {
-			el.scrollIntoView({
-				behavior: 'smooth',
-				block: 'center',
-				inline: 'center'
-			});
-		}`)
-		if err != nil {
-			return fmt.Errorf("ошибка прокрутки к элементу: %w", err)
-		}
-
-		time.Sleep(300 * time.Millisecond)
+	// Если элемент уже виден, не нужно прокручивать
+	if isVisible {
+		return nil
 	}
 
-	inViewport, err := b.isElementInViewport(element)
+	// Используем Playwright's встроенный метод прокрутки - более надежный
+	// Это предотвращает бесконечную прокрутку и работает синхронно
+	err = element.ScrollIntoViewIfNeeded(playwright.ElementHandleScrollIntoViewIfNeededOptions{
+		Timeout: playwright.Float(5000),
+	})
 	if err != nil {
-		return fmt.Errorf("ошибка проверки viewport: %w", err)
-	}
-
-	if !inViewport {
+		// Если ScrollIntoViewIfNeeded не работает, используем простой scrollIntoView с auto
 		_, err = element.Evaluate(`el => {
 			el.scrollIntoView({
-				behavior: 'smooth',
+				behavior: 'auto',
 				block: 'center',
 				inline: 'center'
 			});
@@ -56,16 +63,20 @@ func (b *PlaywrightBrowser) ScrollToElement(ctx context.Context, selector string
 		if err != nil {
 			return fmt.Errorf("ошибка прокрутки к элементу: %w", err)
 		}
-
-		time.Sleep(500 * time.Millisecond)
+		// Даем время на завершение прокрутки
+		time.Sleep(200 * time.Millisecond)
 	}
 
 	return nil
 }
 
-func (b *PlaywrightBrowser) isElementInViewport(element interface{}) (bool, error) {
-	result, err := b.page.Evaluate(`(selector) => {
-		const el = document.querySelector(selector);
+func (b *PlaywrightBrowser) isElementInViewport(element playwright.ElementHandle) (bool, error) {
+	if element == nil {
+		return false, fmt.Errorf("element is nil")
+	}
+
+	// Используем Evaluate на самом элементе напрямую
+	result, err := element.Evaluate(`el => {
 		if (!el) return false;
 
 		const rect = el.getBoundingClientRect();
@@ -76,7 +87,7 @@ func (b *PlaywrightBrowser) isElementInViewport(element interface{}) (bool, erro
 		const horInView = (rect.left <= windowWidth) && ((rect.left + rect.width) >= 0);
 
 		return vertInView && horInView;
-	}`, element)
+	}`)
 
 	if err != nil {
 		return false, err
@@ -149,3 +160,4 @@ func (b *PlaywrightBrowser) ScrollByAmount(ctx context.Context, x, y int) error 
 	time.Sleep(300 * time.Millisecond)
 	return nil
 }
+

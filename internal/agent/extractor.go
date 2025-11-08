@@ -26,7 +26,7 @@ func (a *Agent) extractElements(html string) []PageElement {
 
 		tag := strings.ToLower(match[1])
 		attrs := match[2]
-		
+
 		// Извлекаем текст из атрибутов (aria-label, title, alt) или ищем текст после тега
 		text := a.extractTextFromAttributes(attrs)
 		if text == "" {
@@ -95,19 +95,19 @@ func (a *Agent) extractTextAfterTag(html, tagMatch string) string {
 	if idx == -1 {
 		return ""
 	}
-	
+
 	// Ищем текст после закрывающей скобки тега до следующего тега
 	start := idx + len(tagMatch)
 	if start >= len(html) {
 		return ""
 	}
-	
+
 	// Ищем текст до следующего < или до конца строки
 	end := strings.Index(html[start:], "<")
 	if end == -1 {
 		end = len(html) - start
 	}
-	
+
 	text := strings.TrimSpace(html[start : start+end])
 	return text
 }
